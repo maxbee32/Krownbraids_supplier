@@ -3,7 +3,7 @@
 
 import { useState } from "react";
 import { Button } from "../../../ui/Button";
-// import { OnboardingData } from "../page";
+import { OnboardingData } from "../../../../(auth)/onboarding/page";
 import {
   ArrowLeft,
   Check,

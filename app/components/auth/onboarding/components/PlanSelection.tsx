@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { Button } from "../../../ui/Button";
-// import { OnboardingData } from "../page";
+import { OnboardingData } from "../../../../(auth)/onboarding/page";
 import { Check, Star, ArrowRight, AlertCircle } from "lucide-react";
 
 interface Plan {
