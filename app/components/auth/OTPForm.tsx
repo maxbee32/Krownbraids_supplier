@@ -221,8 +221,10 @@ export function OTPForm() {
           {otp.map((digit, index) => (
             <input
               key={index}
-              ref={(el) => (inputRefs.current[index] = el)}
-              type="text"
+                ref={(el) => {
+                inputRefs.current[index] = el;
+                }}            
+            type="text"
               inputMode="numeric"
               maxLength={1}
               value={digit}

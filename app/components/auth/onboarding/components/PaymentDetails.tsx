@@ -2,7 +2,7 @@
 "use client";
 
 import { Button } from "../../../ui/Button";
-import { OnboardingData } from "../page";
+// import { OnboardingData } from "../page";
 import { ArrowLeft, ArrowRight, CreditCard, ShieldCheck, Lock } from "lucide-react";
 
 interface PaymentDetailsProps {

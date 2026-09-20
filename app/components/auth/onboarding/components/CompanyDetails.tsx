@@ -3,7 +3,7 @@
 
 import { Button } from "../../../ui/Button";
 import { Input } from "../../../ui/Input";
-import { OnboardingData } from "../page";
+// import { OnboardingData } from "../page";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
 interface CompanyDetailsProps {
