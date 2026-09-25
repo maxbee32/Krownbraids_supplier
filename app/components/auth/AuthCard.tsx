@@ -25,17 +25,17 @@ export function AuthCard({ children, title, subtitle, image = "login" }: AuthCar
       </header>
 
       {/* Main content */}
-      <main className="flex-1 flex items-center justify-center px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+      <main className="flex-1 flex items-start lg:items-center justify-center px-0 sm:px-6 lg:px-8 py-6 sm:py-12">
         <div className="w-full max-w-5xl">
-          <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-stretch">
+          <div className="grid lg:grid-cols-2 gap-0 sm:gap-8 lg:gap-12 items-stretch">
             {/* Form panel */}
-            <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-6 sm:p-8 lg:p-10">
+            <div className="bg-white sm:rounded-2xl sm:border sm:border-neutral-200 sm:shadow-sm p-6 sm:p-8 lg:p-10">
               {/* Header */}
               <div className="mb-6 sm:mb-8">
-                <h1 className="text-2xl sm:text-3xl font-bold text-neutral-900 tracking-tight">
+                <h1 className="text-3xl sm:text-3xl font-bold text-neutral-900 tracking-tight">
                   {title}
                 </h1>
-                <p className="mt-2 text-sm sm:text-base text-neutral-600">
+                <p className="mt-2 text-base sm:text-base text-neutral-600">
                   {subtitle}
                 </p>
               </div>

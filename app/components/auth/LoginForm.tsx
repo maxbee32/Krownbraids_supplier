@@ -175,7 +175,8 @@ export function LoginForm() {
         </button>
       </div>
 
-      <div className="flex items-center justify-between">
+      {/* Remember me / Forgot password — responsive */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"
@@ -186,7 +187,7 @@ export function LoginForm() {
         </label>
         <Link
           href="/forgot-password"
-          className="text-sm text-neutral-600 hover:text-neutral-900 transition-colors"
+          className="text-sm text-neutral-600 hover:text-neutral-900 transition-colors sm:text-right"
         >
           Forgot password?
         </Link>
