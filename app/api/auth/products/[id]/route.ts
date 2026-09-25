@@ -1,3 +1,4 @@
+// app/api/auth/products/[id]/route.ts
 import { NextResponse } from "next/server";
 
 const SUPPLIER_SERVICE_URL =
@@ -11,18 +12,22 @@ function authHeader(request: Request): string | null {
 
 export async function PUT(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   const auth = authHeader(request);
   if (!auth) {
-    return NextResponse.json({ success: false, message: "Authentication required" }, { status: 401 });
+    return NextResponse.json(
+      { success: false, message: "Authentication required" },
+      { status: 401 }
+    );
   }
 
   try {
     const body = await request.json();
 
     const res = await fetch(
-      `${SUPPLIER_SERVICE_URL}/suppliers/products/${params.id}`,
+      `${SUPPLIER_SERVICE_URL}/suppliers/products/${id}`,
       {
         method: "PUT",
         headers: {
@@ -46,22 +51,29 @@ export async function PUT(
     return NextResponse.json(data, { status: res.status });
   } catch (err) {
     console.error("Product PUT error:", err);
-    return NextResponse.json({ success: false, message: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, message: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   const auth = authHeader(request);
   if (!auth) {
-    return NextResponse.json({ success: false, message: "Authentication required" }, { status: 401 });
+    return NextResponse.json(
+      { success: false, message: "Authentication required" },
+      { status: 401 }
+    );
   }
 
   try {
     const res = await fetch(
-      `${SUPPLIER_SERVICE_URL}/suppliers/products/${params.id}`,
+      `${SUPPLIER_SERVICE_URL}/suppliers/products/${id}`,
       {
         method: "DELETE",
         headers: {
@@ -83,6 +95,9 @@ export async function DELETE(
     return NextResponse.json(data, { status: res.status });
   } catch (err) {
     console.error("Product DELETE error:", err);
-    return NextResponse.json({ success: false, message: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, message: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
