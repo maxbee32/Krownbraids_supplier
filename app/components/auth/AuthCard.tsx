@@ -13,16 +13,19 @@ interface AuthCardProps {
 export function AuthCard({ children, title, subtitle, image = "login" }: AuthCardProps) {
   return (
     <div className="min-h-screen flex flex-col bg-white lg:bg-neutral-50">
-      {/* Top bar — matches the landing page nav */}
-      <header className="w-full bg-white border-b border-neutral-200 flex-shrink-0">
+      {/* Fixed top bar — matches the landing page nav exactly */}
+      <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-md z-50 border-b border-neutral-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center h-16 md:h-20">
+          <div className="flex justify-between items-center h-16 md:h-20">
             <Link href="/" className="flex-shrink-0">
               <Logo />
             </Link>
           </div>
         </div>
       </header>
+
+      {/* Spacer to offset the fixed header */}
+      <div className="h-16 md:h-20 flex-shrink-0" />
 
       {/* Main content */}
       <main className="flex-1 flex items-start lg:items-center justify-center px-0 sm:px-6 lg:px-8 py-6 sm:py-12">
