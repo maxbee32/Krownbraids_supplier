@@ -12,8 +12,7 @@ interface AuthCardProps {
 
 export function AuthCard({ children, title, subtitle, image = "login" }: AuthCardProps) {
   return (
-    <div className="min-h-screen flex flex-col lg:grid lg:grid-cols-2">
-      {/* Left side - Form */}
+<div className="min-h-screen w-full flex flex-col lg:grid lg:grid-cols-2 bg-white lg:bg-neutral-900">      {/* Left side - Form */}
       <div className="flex-1 flex flex-col justify-center px-4 sm:px-6 md:px-8 lg:px-12 py-8 sm:py-10 lg:py-12 bg-white">
         <div className="w-full max-w-md mx-auto">
           {/* Logo */}
