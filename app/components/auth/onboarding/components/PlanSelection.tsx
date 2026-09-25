@@ -33,6 +33,8 @@ interface PlanSelectionProps {
   data: OnboardingData;
   updateData: (updates: Partial<OnboardingData>) => void;
   onNext: () => void;
+  isSubmitting?: boolean;               // ← ADD
+
 }
 
 export function PlanSelection({ data, updateData, onNext }: PlanSelectionProps) {

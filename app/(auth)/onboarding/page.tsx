@@ -12,13 +12,11 @@ import { PaymentDetails } from "../../components/auth/onboarding/components/Paym
 import { ReviewSubmit } from "../../components/auth/onboarding/components/ReviewSubmit";
 
 export interface OnboardingData {
-  // Step 1: Plan
   planId: number | null;
   planName: string;
   planPrice: number;
   billingCycle: "monthly" | "yearly";
 
-  // Step 2: Company
   companyName: string;
   companyEmail: string;
   companyPhone: string;
@@ -33,7 +31,6 @@ export interface OnboardingData {
   taxId: string;
   description: string;
 
-  // Step 3: Payment (display only — actual payment via SumUp)
   paymentMethod: "card" | "bank_transfer" | null;
   cardNumber: string;
   cardName: string;
@@ -75,11 +72,20 @@ const STEPS = [
   { id: 4, name: "Review", shortName: "Review" },
 ];
 
+function stepToUiStep(backendStep: string | null | undefined): number {
+  switch (backendStep) {
+    case "PLAN":      return 1;
+    case "BUSINESS":  return 2;
+    case "PAYMENT":   return 3;
+    case "REVIEW":    return 4;
+    case "COMPLETED": return 4;
+    default:          return 1;
+  }
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
 
-  // ✅ Hydration guard
-  const [isHydrated, setIsHydrated] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
 
@@ -89,102 +95,91 @@ export default function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
 
   // ─────────────────────────────────────────────
-  // STEP 1: Mark hydrated
+  // Single bootstrap effect
   // ─────────────────────────────────────────────
   useEffect(() => {
-    setIsHydrated(true);
-  }, []);
+    let cancelled = false;
 
-  // ─────────────────────────────────────────────
-  // STEP 2: Check auth + onboarding status
-  // ─────────────────────────────────────────────
-  useEffect(() => {
-    if (!isHydrated) return;
+    const bootstrap = async () => {
+      const token = localStorage.getItem("adminToken");
+      if (!token) {
+        router.replace("/login");
+        return;
+      }
 
-    const token = localStorage.getItem("adminToken");
-    if (!token) {
-      router.replace("/login");
-      return;
-    }
-
-    const checkStatus = async () => {
       try {
         const res = await fetch("/api/auth/onboarding/status", {
           headers: { Authorization: `Bearer ${token}` },
         });
         const result = await res.json();
 
-        // If already submitted, route them appropriately
-        if (result.data?.onboardingCompleted) {
-          const status = result.data.status;
+        if (cancelled) return;
 
-        //   if (status === "PENDING_APPROVAL") {
-        //     // Business saved but payment not done → go to payment
-        //     router.replace("/onboarding/payment");
-        //     return;
-        //   }
-
-        // ✅ CORRECT — resume the wizard
-if (status === "PENDING_APPROVAL") {
-  // Prefill from backend if data exists
-  if (result.data) {
-    setData((prev) => ({
-      ...prev,
-      planId: result.data.selectedPlanId || prev.planId,
-      planName: result.data.planName || prev.planName,
-      planPrice: result.data.planPrice || prev.planPrice,
-      billingCycle: result.data.billingCycle || prev.billingCycle,
-      companyName: result.data.companyName || prev.companyName,
-      companyType: result.data.companyType || prev.companyType,
-      companyEmail: result.data.email || prev.companyEmail,
-      companyPhone: result.data.phoneNumber || prev.companyPhone,
-      companyWebsite: result.data.website || prev.companyWebsite,
-      address: result.data.address || prev.address,
-      city: result.data.city || prev.city,
-      state: result.data.state || prev.state,
-      country: result.data.country || prev.country,
-      postalCode: result.data.postalCode || prev.postalCode,
-      description: result.data.description || prev.description,
-    }));
-    setCurrentStep(4); // Jump to review step
-  }
-  setIsAuthenticated(true);
-  setIsCheckingStatus(false);
-  return;
-}
-
-          if (status === "PAYMENT_CONFIRMED") {
-            router.replace("/dashboard/pending-approval");
-            return;
-          }
-
-          if (status === "APPROVED" || status === "ACTIVE") {
-            router.replace("/dashboard");
-            return;
-          }
-
-          if (status === "REJECTED" || status === "DECLINED") {
-            router.replace("/dashboard/rejected");
-            return;
-          }
-
-          if (status === "SUSPENDED") {
-            router.replace("/dashboard/suspended");
-            return;
-          }
+        if (!result.data) {
+          setCurrentStep(1);
+          setIsAuthenticated(true);
+          setIsCheckingStatus(false);
+          return;
         }
 
+        const business = result.data;
+        const status = business.status as string;
+        const step = business.onboardingStep as string | null;
+
+        if (status === "PAYMENT_CONFIRMED" || status === "REVIEW") {
+          router.replace("/dashboard/pending-approval");
+          return;
+        }
+        if (status === "APPROVED" || status === "ACTIVE") {
+          router.replace("/dashboard");
+          return;
+        }
+        if (status === "REJECTED" || status === "DECLINED") {
+          router.replace("/dashboard/rejected");
+          return;
+        }
+        if (status === "SUSPENDED") {
+          router.replace("/dashboard/suspended");
+          return;
+        }
+
+        setData((prev) => ({
+          ...prev,
+          planId: business.selectedPlanId ?? prev.planId,
+          planName: business.planName ?? prev.planName,
+          billingCycle: (business.billingCycle as "monthly" | "yearly") ?? prev.billingCycle,
+          companyName: business.companyName ?? prev.companyName,
+          companyType: business.companyType ?? prev.companyType,
+          companyEmail: business.email ?? prev.companyEmail,
+          companyPhone: business.phoneNumber ?? prev.companyPhone,
+          companyWebsite: business.website ?? prev.companyWebsite,
+          address: business.address ?? prev.address,
+          city: business.city ?? prev.city,
+          state: business.state ?? prev.state,
+          country: business.country ?? prev.country,
+          postalCode: business.postalCode ?? prev.postalCode,
+          registrationNumber: business.registrationNumber ?? prev.registrationNumber,
+          taxId: business.taxId ?? prev.taxId,
+          description: business.description ?? prev.description,
+        }));
+
+        setCurrentStep(stepToUiStep(step));
         setIsAuthenticated(true);
         setIsCheckingStatus(false);
       } catch (err) {
+        if (cancelled) return;
         console.error("Status check failed:", err);
         setIsAuthenticated(true);
         setIsCheckingStatus(false);
       }
     };
 
-    checkStatus();
-  }, [isHydrated, router]);
+    bootstrap();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const updateData = (updates: Partial<OnboardingData>) => {
     setData((prev) => ({ ...prev, ...updates }));
@@ -204,9 +199,94 @@ if (status === "PENDING_APPROVAL") {
     }
   };
 
-  // ─────────────────────────────────────────────
-  // SUBMIT → SAVE BUSINESS → INIT PAYMENT → REDIRECT TO SUMUP
-  // ─────────────────────────────────────────────
+  const savePlanAndContinue = async () => {
+    setError(null);
+    if (!data.planId) {
+      setError("Please select a plan.");
+      return;
+    }
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/auth/supplier-onboarding/plan", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          planId: data.planId,
+          planName: data.planName,
+          billingCycle: data.billingCycle,
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok || !result.success) {
+        throw new Error(result.message || "Failed to save plan");
+      }
+
+      goToNextStep();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save plan");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const saveBusinessAndContinue = async () => {
+    setError(null);
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/auth/supplier-onboarding/business", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          companyName: data.companyName,
+          companyType: data.companyType,
+          description: data.description,
+          email: data.companyEmail,
+          phoneNumber: data.companyPhone,
+          website: data.companyWebsite,
+          address: data.address,
+          city: data.city,
+          state: data.state,
+          country: data.country,
+          postalCode: data.postalCode,
+          registrationNumber: data.registrationNumber,
+          taxId: data.taxId,
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok || !result.success) {
+        throw new Error(result.message || "Failed to save business info");
+      }
+
+      goToNextStep();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save business info");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = async () => {
     setIsSubmitting(true);
     setError(null);
@@ -218,115 +298,35 @@ if (status === "PENDING_APPROVAL") {
         return;
       }
 
-      // ═══════════════════════════════════════
-      // STEP A: Save business (status = PENDING_APPROVAL)
-      // ═══════════════════════════════════════
-      console.log("Submitting onboarding...");
-
-      const onboardingRes = await fetch("/api/auth/onboarding", {
+      const paymentRes = await fetch("/api/auth/supplier-payment/initialize", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          // Plan
           planId: data.planId,
-          planName: data.planName,
-          planPrice: data.planPrice,
           billingCycle: data.billingCycle,
-
-          // Company
-          companyName: data.companyName,
-          companyType: data.companyType,
-          description: data.description,
-          email: data.companyEmail,
-          phoneNumber: data.companyPhone,
-          website: data.companyWebsite,
-
-          // Address
-          address: data.address,
-          city: data.city,
-          state: data.state,
-          country: data.country,
-          postalCode: data.postalCode,
-
-          // Legal
-          registrationNumber: data.registrationNumber,
-          taxId: data.taxId,
-
-          // Payment (display hint only)
-          paymentMethod: data.paymentMethod,
-          paymentLast4: data.cardNumber
-            ? data.cardNumber.replace(/\s/g, "").slice(-4)
-            : null,
         }),
       });
 
-      const onboardingResult = await onboardingRes.json();
-      console.log("Onboarding result:", onboardingResult);
-
-      if (!onboardingRes.ok) {
-        throw new Error(
-          onboardingResult.message || "Failed to save onboarding"
-        );
-      }
-
-      // ═══════════════════════════════════════
-      // STEP B: Initialize SumUp payment
-      // ═══════════════════════════════════════
-      console.log("Initializing payment...");
-
-      const paymentRes = await fetch(
-        "/api/auth/supplier-payment/initialize",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            supplierId: onboardingResult.data?.supplierId,
-            planId: data.planId,
-            billingCycle: data.billingCycle,
-          }),
-        }
-      );
-
       const paymentResult = await paymentRes.json();
-      console.log("Payment result:", paymentResult);
-
       if (!paymentRes.ok || !paymentResult.success) {
-        throw new Error(
-          paymentResult.message || "Failed to initialize payment"
-        );
+        throw new Error(paymentResult.message || "Failed to initialize payment");
       }
 
-      // ═══════════════════════════════════════
-      // STEP C: Store checkoutId + Redirect to SumUp
-      // ═══════════════════════════════════════
-      console.log("Redirecting to SumUp:", paymentResult.redirectUrl);
-
-      // ✅ FIX: Store checkoutId in localStorage for the verify page
       if (paymentResult.checkoutId) {
         localStorage.setItem("checkoutId", paymentResult.checkoutId);
-        console.log("💾 Stored checkoutId:", paymentResult.checkoutId);
-      } else {
-        console.warn("⚠️ No checkoutId in payment response!");
       }
 
       window.location.href = paymentResult.redirectUrl;
     } catch (err) {
-      console.error("Submit error:", err);
       setError(err instanceof Error ? err.message : "Something went wrong");
       setIsSubmitting(false);
     }
   };
 
-  // ─────────────────────────────────────────────
-  // RENDER GUARDS
-  // ─────────────────────────────────────────────
-  if (!isHydrated || isCheckingStatus) {
+  if (isCheckingStatus) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-neutral-50">
         <div className="text-center">
@@ -337,13 +337,10 @@ if (status === "PENDING_APPROVAL") {
     );
   }
 
-  if (!isAuthenticated) {
-    return null;
-  }
+  if (!isAuthenticated) return null;
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      {/* Header */}
       <header className="bg-white border-b border-neutral-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between">
@@ -357,7 +354,6 @@ if (status === "PENDING_APPROVAL") {
         </div>
       </header>
 
-      {/* Progress */}
       <div className="bg-white border-b border-neutral-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <StepIndicator
@@ -370,7 +366,6 @@ if (status === "PENDING_APPROVAL") {
         </div>
       </div>
 
-      {/* Content */}
       <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
         {error && (
           <div className="mb-6 p-4 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
@@ -383,7 +378,8 @@ if (status === "PENDING_APPROVAL") {
             <PlanSelection
               data={data}
               updateData={updateData}
-              onNext={goToNextStep}
+              onNext={savePlanAndContinue}
+              isSubmitting={isSubmitting}
             />
           )}
 
@@ -391,8 +387,9 @@ if (status === "PENDING_APPROVAL") {
             <CompanyDetails
               data={data}
               updateData={updateData}
-              onNext={goToNextStep}
+              onNext={saveBusinessAndContinue}
               onBack={goToPreviousStep}
+              isSubmitting={isSubmitting}
             />
           )}
 
@@ -417,10 +414,7 @@ if (status === "PENDING_APPROVAL") {
 
         <div className="mt-8 text-center text-sm text-neutral-500">
           Need help?{" "}
-          <Link
-            href="/contact"
-            className="text-neutral-900 hover:underline font-medium"
-          >
+          <Link href="/contact" className="text-neutral-900 hover:underline font-medium">
             Contact support
           </Link>
         </div>

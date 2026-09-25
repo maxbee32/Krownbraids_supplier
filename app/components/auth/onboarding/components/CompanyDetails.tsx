@@ -11,6 +11,8 @@ interface CompanyDetailsProps {
   updateData: (updates: Partial<OnboardingData>) => void;
   onNext: () => void;
   onBack: () => void;
+  isSubmitting?: boolean;               // ← ADD
+
 }
 
 const COMPANY_TYPES = [
