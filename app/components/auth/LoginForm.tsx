@@ -70,8 +70,25 @@ export function LoginForm() {
 
       // ✅ Store token
       localStorage.setItem("adminToken", token);
-      if (loginData.userId) localStorage.setItem("userId", String(loginData.userId));
-      if (loginData.role) localStorage.setItem("userRole", loginData.role);
+
+      // ✅ Store supplier info — read from BOTH field names for safety
+      const supplierId = loginData.supplierId || loginData.userId;
+      if (supplierId) {
+        localStorage.setItem("userId", String(supplierId));
+        localStorage.setItem(
+          "supplierData",
+          JSON.stringify({
+            id: supplierId,
+            fullName: loginData.fullName ?? null,
+            email: loginData.email ?? email,
+            role: loginData.role ?? "SUPPLIER",
+          })
+        );
+      }
+
+      if (loginData.role) {
+        localStorage.setItem("userRole", loginData.role);
+      }
 
       // ─────────────────────────────────────────
       // STEP 2: Fetch onboarding status

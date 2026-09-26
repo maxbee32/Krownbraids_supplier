@@ -33,6 +33,8 @@ interface PlanSelectionProps {
   data: OnboardingData;
   updateData: (updates: Partial<OnboardingData>) => void;
   onNext: () => void;
+  onBack?: () => void;   // ← ADD (optional, like CompanyDetails)
+
   isSubmitting?: boolean;               // ← ADD
 
 }

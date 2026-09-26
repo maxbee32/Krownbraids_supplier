@@ -20,6 +20,9 @@ export async function POST(request: Request) {
     const body = await request.json();
     console.log("Initialize request:", body);
 
+    // ─────────────────────────────────────────
+    // Validate required fields
+    // ─────────────────────────────────────────
     if (!body.planId || !body.billingCycle) {
       return NextResponse.json(
         { message: "Plan ID and billing cycle are required" },
@@ -27,8 +30,20 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!body.supplierId) {
+      console.error("❌ supplierId is missing from payment init request");
+      return NextResponse.json(
+        {
+          message:
+            "Supplier ID is required. Please log in again if the problem persists.",
+        },
+        { status: 400 }
+      );
+    }
+
     const backendUrl = `${PAYMENT_SERVICE_URL}/api/v1/auth/supplier-payment/initialize`;
     console.log("Calling backend:", backendUrl);
+    console.log("Forwarding body:", JSON.stringify(body));
 
     const response = await fetch(backendUrl, {
       method: "POST",
@@ -38,6 +53,7 @@ export async function POST(request: Request) {
         Authorization: authHeader,
         "ngrok-skip-browser-warning": "true",
       },
+      // ✅ Forward the entire body — including supplierId
       body: JSON.stringify(body),
     });
 

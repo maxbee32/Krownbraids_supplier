@@ -65,17 +65,19 @@ const INITIAL_DATA: OnboardingData = {
   cardCvc: "",
 };
 
+// 🔄 Step order: Business → Plan → Payment → Review
 const STEPS = [
-  { id: 1, name: "Choose Plan", shortName: "Plan" },
-  { id: 2, name: "Company Details", shortName: "Company" },
+  { id: 1, name: "Company Details", shortName: "Company" },
+  { id: 2, name: "Choose Plan", shortName: "Plan" },
   { id: 3, name: "Payment", shortName: "Payment" },
   { id: 4, name: "Review", shortName: "Review" },
 ];
 
+// 🔄 Backend step → UI step (backend step means "next step to do")
 function stepToUiStep(backendStep: string | null | undefined): number {
   switch (backendStep) {
-    case "PLAN":      return 1;
-    case "BUSINESS":  return 2;
+    case "BUSINESS":  return 1;
+    case "PLAN":      return 2;
     case "PAYMENT":   return 3;
     case "REVIEW":    return 4;
     case "COMPLETED": return 4;
@@ -95,7 +97,7 @@ export default function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
 
   // ─────────────────────────────────────────────
-  // Single bootstrap effect
+  // Bootstrap: check auth + resume from saved step
   // ─────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -199,47 +201,9 @@ export default function OnboardingPage() {
     }
   };
 
-  const savePlanAndContinue = async () => {
-    setError(null);
-    if (!data.planId) {
-      setError("Please select a plan.");
-      return;
-    }
-
-    const token = localStorage.getItem("adminToken");
-    if (!token) {
-      router.replace("/login");
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const res = await fetch("/api/auth/supplier-onboarding/plan", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          planId: data.planId,
-          planName: data.planName,
-          billingCycle: data.billingCycle,
-        }),
-      });
-
-      const result = await res.json();
-      if (!res.ok || !result.success) {
-        throw new Error(result.message || "Failed to save plan");
-      }
-
-      goToNextStep();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save plan");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
+  // ═══════════════════════════════════════
+  // STEP 1 — Save business info (creates the row)
+  // ═══════════════════════════════════════
   const saveBusinessAndContinue = async () => {
     setError(null);
 
@@ -251,7 +215,7 @@ export default function OnboardingPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch("/api/auth/supplier-onboarding/business", {
+      const res = await fetch("/api/auth/onboarding/business", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -287,6 +251,54 @@ export default function OnboardingPage() {
     }
   };
 
+  // ═══════════════════════════════════════
+  // STEP 2 — Save plan selection
+  // ═══════════════════════════════════════
+  const savePlanAndContinue = async () => {
+    setError(null);
+
+    if (!data.planId) {
+      setError("Please select a plan.");
+      return;
+    }
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const res = await fetch("/api/auth/onboarding/plan", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          planId: data.planId,
+          planName: data.planName,
+          billingCycle: data.billingCycle,
+        }),
+      });
+
+      const result = await res.json();
+      if (!res.ok || !result.success) {
+        throw new Error(result.message || "Failed to save plan");
+      }
+
+      goToNextStep();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save plan");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // ═══════════════════════════════════════
+  // STEP 4 — Initialize payment (SumUp redirect)
+  // ═══════════════════════════════════════
   const handleSubmit = async () => {
     setIsSubmitting(true);
     setError(null);
@@ -298,6 +310,63 @@ export default function OnboardingPage() {
         return;
       }
 
+      // ─────────────────────────────────────────
+      // Resolve supplierId from localStorage
+      // ─────────────────────────────────────────
+      let supplierId: string | null = null;
+
+      // 1. Try supplierData.id
+      try {
+        const stored = localStorage.getItem("supplierData");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          supplierId = parsed.id ?? parsed.supplierId ?? null;
+        }
+      } catch {
+        // ignore
+      }
+
+      // 2. Fallback to userId
+      if (!supplierId) {
+        supplierId = localStorage.getItem("userId");
+      }
+
+      // 3. Last resort — fetch from the API
+      if (!supplierId) {
+        try {
+          const meRes = await fetch("/api/auth/supplier/me", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const meData = await meRes.json();
+          if (meData.success && meData.data?.id) {
+            supplierId = meData.data.id;
+            localStorage.setItem("userId", supplierId as string);
+            localStorage.setItem(
+              "supplierData",
+              JSON.stringify({
+                id: supplierId,
+                fullName: meData.data.fullName,
+                email: meData.data.email,
+                role: meData.data.role ?? "SUPPLIER",
+              })
+            );
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      if (!supplierId) {
+        throw new Error(
+          "Could not determine your supplier ID. Please log in again."
+        );
+      }
+
+      console.log("[payment-init] supplierId:", supplierId);
+
+      // ─────────────────────────────────────────
+      // Initialize payment with supplierId
+      // ─────────────────────────────────────────
       const paymentRes = await fetch("/api/auth/supplier-payment/initialize", {
         method: "POST",
         headers: {
@@ -305,6 +374,7 @@ export default function OnboardingPage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
+          supplierId,
           planId: data.planId,
           billingCycle: data.billingCycle,
         }),
@@ -341,10 +411,11 @@ export default function OnboardingPage() {
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      <header className="bg-white border-b border-neutral-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <Link href="/">
+      {/* Fixed top bar — matches landing page and auth pages */}
+      <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-md z-50 border-b border-neutral-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16 md:h-20">
+            <Link href="/" className="flex-shrink-0">
               <Logo />
             </Link>
             <div className="text-sm text-neutral-500 hidden sm:block">
@@ -354,6 +425,10 @@ export default function OnboardingPage() {
         </div>
       </header>
 
+      {/* Spacer for the fixed header */}
+      <div className="h-16 md:h-20" />
+
+      {/* Step indicator */}
       <div className="bg-white border-b border-neutral-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <StepIndicator
@@ -374,16 +449,8 @@ export default function OnboardingPage() {
         )}
 
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm">
+          {/* Step 1 — Company Details */}
           {currentStep === 1 && (
-            <PlanSelection
-              data={data}
-              updateData={updateData}
-              onNext={savePlanAndContinue}
-              isSubmitting={isSubmitting}
-            />
-          )}
-
-          {currentStep === 2 && (
             <CompanyDetails
               data={data}
               updateData={updateData}
@@ -393,6 +460,18 @@ export default function OnboardingPage() {
             />
           )}
 
+          {/* Step 2 — Choose Plan */}
+          {currentStep === 2 && (
+            <PlanSelection
+              data={data}
+              updateData={updateData}
+              onNext={savePlanAndContinue}
+              onBack={goToPreviousStep}
+              isSubmitting={isSubmitting}
+            />
+          )}
+
+          {/* Step 3 — Payment */}
           {currentStep === 3 && (
             <PaymentDetails
               data={data}
@@ -402,6 +481,7 @@ export default function OnboardingPage() {
             />
           )}
 
+          {/* Step 4 — Review */}
           {currentStep === 4 && (
             <ReviewSubmit
               data={data}

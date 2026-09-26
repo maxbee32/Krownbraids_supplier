@@ -65,6 +65,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         token: authData.token,
+        supplierId: authData.supplierId,
         userId: authData.userId,
         role: authData.role,
         message: authData.message || data.message || "Login successful",
