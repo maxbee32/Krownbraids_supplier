@@ -1,11 +1,11 @@
-// app/dashboard/pending-approval/page.tsx
+// app/pending-approval/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Logo } from "../../components/ui/Logo";
-import { Clock, CheckCircle, Mail, CreditCard, XCircle } from "lucide-react";
+import { Logo } from "../components/ui/Logo";
+import { Clock, CheckCircle, Mail, CreditCard } from "lucide-react";
 
 interface BusinessStatus {
   status: string;
@@ -81,22 +81,27 @@ export default function PendingApprovalPage() {
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      {/* Header */}
-      <header className="bg-white border-b border-neutral-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <Link href="/">
-            <Logo />
-          </Link>
-          <button
-            onClick={handleLogout}
-            className="text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
-          >
-            Sign out
-          </button>
+      {/* ─── Fixed top bar — matches landing page, auth, onboarding ─── */}
+      <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-md z-50 border-b border-neutral-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16 md:h-20">
+            <Link href="/" className="flex-shrink-0">
+              <Logo />
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Content */}
+      {/* Spacer for the fixed header */}
+      <div className="h-16 md:h-20" />
+
+      {/* ─── Content ─── */}
       <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-8 sm:p-12 text-center">
           {/* Icon */}

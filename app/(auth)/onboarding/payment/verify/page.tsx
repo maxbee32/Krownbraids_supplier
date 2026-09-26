@@ -1,3 +1,4 @@
+// app/(auth)/onboarding/payment/verify/page.tsx
 "use client";
 
 import { useEffect, useState, Suspense } from "react";
@@ -61,7 +62,7 @@ function PaymentVerifyContent() {
           setStatus("success");
           setMessage("Payment confirmed! Redirecting...");
           setTimeout(() => {
-            router.push("/dashboard/pending-approval");
+            router.push("/pending-approval");
           }, 2000);
         } else {
           setStatus("error");
@@ -86,25 +87,29 @@ function PaymentVerifyContent() {
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      {/* ─── Header — matches pending-approval ─── */}
-      <header className="bg-white border-b border-neutral-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <Link href="/">
-            <Logo />
-          </Link>
-          <button
-            onClick={handleLogout}
-            className="text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
-          >
-            Sign out
-          </button>
+      {/* ─── Fixed top bar — matches landing page, auth, and onboarding ─── */}
+      <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-md z-50 border-b border-neutral-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16 md:h-20">
+            <Link href="/" className="flex-shrink-0">
+              <Logo />
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="text-sm text-neutral-500 hover:text-neutral-900 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
+
+      {/* Spacer for the fixed header */}
+      <div className="h-16 md:h-20" />
 
       {/* ─── Content ─── */}
       <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-8 sm:p-12 text-center">
-
           {/* ─── Loading state ─── */}
           {status === "loading" && (
             <>
@@ -116,7 +121,6 @@ function PaymentVerifyContent() {
               </h1>
               <p className="text-neutral-600 max-w-md mx-auto">{message}</p>
 
-              {/* Spinner strip */}
               <div className="bg-neutral-50 rounded-xl p-4 mt-8">
                 <div className="flex items-center gap-3">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-900 flex-shrink-0" />
@@ -141,7 +145,6 @@ function PaymentVerifyContent() {
                 {message}
               </p>
 
-              {/* Timeline — mirrors pending-approval */}
               <div className="bg-white border border-neutral-200 rounded-xl p-6 text-left mb-8">
                 <h3 className="text-sm font-semibold text-neutral-900 mb-4 uppercase tracking-wider">
                   What happens next
@@ -198,7 +201,6 @@ function PaymentVerifyContent() {
                 {message}
               </p>
 
-              {/* Info note */}
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 text-left">
                 <p className="text-sm text-red-900">
                   <span className="font-medium">Need help?</span>{" "}
@@ -210,7 +212,6 @@ function PaymentVerifyContent() {
                 </p>
               </div>
 
-              {/* Actions */}
               <div className="space-y-3">
                 <button
                   onClick={() => router.push("/onboarding")}
@@ -239,11 +240,18 @@ export default function PaymentVerifyPage() {
     <Suspense
       fallback={
         <div className="min-h-screen bg-neutral-50">
-          <header className="bg-white border-b border-neutral-200">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-              <Logo />
+          <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-md z-50 border-b border-neutral-200">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+              <div className="flex items-center justify-between h-16 md:h-20">
+                <Link href="/" className="flex-shrink-0">
+                  <Logo />
+                </Link>
+              </div>
             </div>
           </header>
+
+          <div className="h-16 md:h-20" />
+
           <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
             <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-8 sm:p-12 text-center">
               <div className="w-20 h-20 rounded-full bg-neutral-100 flex items-center justify-center mx-auto mb-6">
