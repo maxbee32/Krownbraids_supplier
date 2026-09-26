@@ -120,7 +120,7 @@ export function LoginForm() {
 
       // Onboarding done, but pending admin review
       if (status === "PENDING_APPROVAL" || status === "REVIEW") {
-        router.push("/dashboard/pending-approval");
+        router.push("/pending-approval");
         return;
       }
 
