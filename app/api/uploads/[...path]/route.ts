@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 
 // Direct tunnel to the supplier service (bypasses the gateway, serves /uploads/**)
-const SUPPLIER_SERVICE_ROOT = "https://c37c-82-36-98-104.ngrok-free.app";
+const SUPPLIER_SERVICE_ROOT = "https://5783-82-36-98-104.ngrok-free.app";
 
 export async function GET(
   request: Request,

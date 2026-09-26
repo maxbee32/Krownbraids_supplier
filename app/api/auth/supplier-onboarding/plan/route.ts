@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 const SUPPLIER_SERVICE_URL =
   process.env.SUPPLIER_SERVICE_URL ||
-  "https://5836-82-36-98-104.ngrok-free.app/supservice/api/v1/auth";
+  "https://58bb-82-36-98-104.ngrok-free.app/supservice/api/v1/auth";
 
 export async function PUT(request: Request) {
   try {

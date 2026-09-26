@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 const BACKEND_URL =
   process.env.BACKEND_URL ||
-  "https://5836-82-36-98-104.ngrok-free.app/aservice/api/v1/auth";
+  "https://58bb-82-36-98-104.ngrok-free.app/aservice/api/v1/auth";
 
 /**
  * Public — list active supplier plans.
