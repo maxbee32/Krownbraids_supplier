@@ -129,7 +129,7 @@ export default function OnboardingPage() {
         const step = business.onboardingStep as string | null;
 
         if (status === "PAYMENT_CONFIRMED" || status === "REVIEW") {
-          router.replace("/dashboard/pending-approval");
+          router.replace("/pending-approval");
           return;
         }
         if (status === "APPROVED" || status === "ACTIVE") {
