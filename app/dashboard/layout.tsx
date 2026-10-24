@@ -25,9 +25,6 @@ import { Logo } from "../components/ui/Logo";
 import { useAuthToken } from "../../lib/hooks/useAuthToken";
 import { useSubscription } from "../../lib/hooks/useSubscription";
 
-// ─────────────────────────────────────────
-// NAV ITEMS
-// ─────────────────────────────────────────
 const navItems = [
   { name: "Dashboard", icon: HomeIcon, href: "/dashboard" },
   { name: "Products", icon: ShoppingBagIcon, href: "/dashboard/products" },
@@ -38,9 +35,6 @@ const navItems = [
   { name: "Settings", icon: Cog6ToothIcon, href: "/dashboard/settings" },
 ];
 
-// ─────────────────────────────────────────
-// SESSION / HELPERS
-// ─────────────────────────────────────────
 const SESSION_KEYS = [
   "adminToken",
   "adminData",
@@ -82,10 +76,6 @@ function daysBadge(days: number | null): string {
   return "bg-green-100 text-green-700 border-green-200";
 }
 
-// ─────────────────────────────────────────
-// NOTIFICATIONS
-// ─────────────────────────────────────────
-
 type NotificationTone = "info" | "warning" | "danger" | "success";
 
 interface AppNotification {
@@ -94,7 +84,7 @@ interface AppNotification {
   body: string;
   tone: NotificationTone;
   href?: string;
-  createdAt: string; // ISO string
+  createdAt: string;
 }
 
 const READ_NOTIFICATIONS_KEY = "supplierReadNotificationIds";
@@ -122,14 +112,6 @@ function saveReadIds(ids: Set<string>) {
   }
 }
 
-/**
- * Generate notifications from the supplier's current subscription state.
- * These are derived (not stored server-side), so:
- *   - read state lives in localStorage
- *   - when the underlying state changes (e.g. trial ends), the notification
- *     appears automatically
- *   - no backend changes needed
- */
 function deriveNotifications(
   planName: string | null,
   billingCycle: string | null,
@@ -180,8 +162,6 @@ function deriveNotifications(
     });
   }
 
-  // First-products prompt: only makes sense if they have no revenue yet
-  // (we don't have that data in this component, so this is a demo prompt)
   items.push({
     id: "add-first-product",
     title: "Add your first product",
@@ -194,10 +174,6 @@ function deriveNotifications(
   return items;
 }
 
-// ─────────────────────────────────────────
-// MAIN LAYOUT
-// ─────────────────────────────────────────
-
 export default function DashboardLayout({
   children,
 }: {
@@ -207,22 +183,29 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // ─── Hydration flag ───
+  // useAuthToken reads localStorage via useSyncExternalStore, but
+  // getServerSnapshot returns null during SSR. Without this flag, the
+  // auth guard fires on the first client effect (when isAuthed is still
+  // false from the server snapshot) and redirects to /login on refresh.
+  const [isHydrated, setIsHydrated] = useState(false);
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
+
   const token = useAuthToken();
   const isAuthed = !!token;
 
   const { subscription, loading: subLoading } = useSubscription(token);
 
-  // ─── Notifications state ───
   const [notifOpen, setNotifOpen] = useState(false);
   const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const notifRef = useRef<HTMLDivElement | null>(null);
 
-  // Load read state once on mount
   useEffect(() => {
     setReadIds(loadReadIds());
   }, []);
 
-  // Close on outside click
   useEffect(() => {
     if (!notifOpen) return;
     const onClick = (e: MouseEvent) => {
@@ -234,24 +217,23 @@ export default function DashboardLayout({
     return () => document.removeEventListener("mousedown", onClick);
   }, [notifOpen]);
 
-  // Close on route change
   useEffect(() => {
     setNotifOpen(false);
   }, [pathname]);
 
-  // Auth guard
+  // ─── Auth guard — waits for hydration ───
   useEffect(() => {
+    if (!isHydrated) return;
     if (!isAuthed) {
       router.replace("/login?reason=missing");
     }
-  }, [isAuthed, router]);
+  }, [isHydrated, isAuthed, router]);
 
   const handleLogout = () => {
     clearSession();
     router.replace("/login?reason=signed-out");
   };
 
-  // Derived values
   const days = subscription?.subscriptionEndDate
     ? daysRemaining(subscription.subscriptionEndDate)
     : null;
@@ -260,7 +242,6 @@ export default function DashboardLayout({
     .filter((i) => pathname === i.href || pathname.startsWith(i.href + "/"))
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
-  // Compute notifications from current state
   const notifications = useMemo(
     () =>
       deriveNotifications(
@@ -273,7 +254,6 @@ export default function DashboardLayout({
 
   const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length;
 
-  // ─── Notification actions ───
   const markRead = (id: string) => {
     setReadIds((prev) => {
       const next = new Set(prev);
@@ -292,11 +272,25 @@ export default function DashboardLayout({
     });
   };
 
+  // ─── Render gates ───
+
+  // Before hydration completes, show a loader. The token hasn't been
+  // read from localStorage yet, so we can't safely redirect OR render
+  // the dashboard.
+  if (!isHydrated) {
+    return (
+      <div className="flex h-dvh items-center justify-center bg-neutral-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-neutral-200 border-t-neutral-900" />
+      </div>
+    );
+  }
+
+  // Hydrated but no token → redirect is in flight; render nothing
   if (!isAuthed) return null;
 
   return (
     <div className="flex h-dvh flex-col bg-neutral-50 overflow-hidden">
-      {/* ────────────── Top bar ────────────── */}
+      {/* Top bar */}
       <header className="flex-shrink-0 border-b border-neutral-200 bg-white z-30">
         <div className="flex items-center justify-between px-4 py-3 sm:px-6 lg:px-8 lg:py-4">
           <div className="flex items-center gap-3">
@@ -333,13 +327,11 @@ export default function DashboardLayout({
 
               {notifOpen && (
                 <>
-                  {/* Mobile backdrop */}
                   <div
                     className="fixed inset-0 z-40 bg-black/20 sm:hidden"
                     onClick={() => setNotifOpen(false)}
                   />
                   <div className="fixed inset-x-4 top-16 z-50 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl sm:absolute sm:inset-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96">
-                    {/* Header */}
                     <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3">
                       <div>
                         <p className="text-sm font-semibold text-neutral-900">
@@ -361,7 +353,6 @@ export default function DashboardLayout({
                       )}
                     </div>
 
-                    {/* Items */}
                     <div className="max-h-[400px] overflow-y-auto">
                       {notifications.length === 0 ? (
                         <div className="px-4 py-8 text-center">
@@ -455,7 +446,6 @@ export default function DashboardLayout({
                       )}
                     </div>
 
-                    {/* Footer */}
                     {notifications.length > 0 && (
                       <div className="border-t border-neutral-100 px-4 py-2 text-center">
                         <button
@@ -471,7 +461,6 @@ export default function DashboardLayout({
               )}
             </div>
 
-            {/* Sign out */}
             <button
               onClick={handleLogout}
               className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
@@ -484,7 +473,7 @@ export default function DashboardLayout({
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* ────────────── Desktop sidebar ────────────── */}
+        {/* Desktop sidebar */}
         <aside className="hidden w-56 flex-shrink-0 flex-col border-r border-neutral-200 bg-white lg:flex xl:w-64">
           <div className="flex-1 space-y-1 overflow-y-auto p-3">
             {navItems.map((item) => {
@@ -525,7 +514,7 @@ export default function DashboardLayout({
           </div>
         </aside>
 
-        {/* ────────────── Mobile sidebar ────────────── */}
+        {/* Mobile sidebar */}
         {sidebarOpen && (
           <>
             <div
@@ -589,14 +578,11 @@ export default function DashboardLayout({
           </>
         )}
 
-        {/* ────────────── Main ────────────── */}
         <main className="flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>
   );
 }
-
-// ────────────── Subscription card ──────────────
 
 function SubscriptionCard({
   planName,
