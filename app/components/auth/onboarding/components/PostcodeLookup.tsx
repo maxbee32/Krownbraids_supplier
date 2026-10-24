@@ -9,16 +9,19 @@ export interface PostcodeAddress {
   line_2: string;
   post_town: string;
   postcode: string;
+  county: string;
 }
 
 interface PostcodeLookupProps {
   postalCode: string;
   address: string;
   city: string;
+  state: string;
   onChange: (patch: {
     postalCode?: string;
     address?: string;
     city?: string;
+    state?: string;
   }) => void;
   disabled?: boolean;
 }
@@ -27,6 +30,7 @@ export function PostcodeLookup({
   postalCode,
   address,
   city,
+  state,
   onChange,
   disabled,
 }: PostcodeLookupProps) {
@@ -76,11 +80,11 @@ export function PostcodeLookup({
         line_2: r.line_2 || "",
         post_town: r.post_town || "",
         postcode: r.postcode || "",
+        county: r.county || "",
       }));
 
       setAddresses(options);
 
-      // Auto-select if only one result
       if (options.length === 1) {
         applyAddress(options[0]);
       }
@@ -96,6 +100,7 @@ export function PostcodeLookup({
     onChange({
       address: [addr.line_1, addr.line_2].filter(Boolean).join(", "),
       city: addr.post_town,
+      state: addr.county,
       postalCode: addr.postcode,
     });
     setAddresses([]);
@@ -146,9 +151,7 @@ export function PostcodeLookup({
             )}
           </button>
         </div>
-        {error && (
-          <p className="mt-1.5 text-xs text-red-600">{error}</p>
-        )}
+        {error && <p className="mt-1.5 text-xs text-red-600">{error}</p>}
       </div>
 
       {/* Address dropdown */}
@@ -178,7 +181,7 @@ export function PostcodeLookup({
         </div>
       )}
 
-      {/* Confirmed address display */}
+      {/* Confirmed address */}
       {address && (
         <div>
           <label className="block text-sm font-medium text-neutral-700 mb-1.5">
@@ -194,19 +197,38 @@ export function PostcodeLookup({
         </div>
       )}
 
-      {/* City */}
-      {city && (
-        <div>
-          <label className="block text-sm font-medium text-neutral-700 mb-1.5">
-            Town / City
-          </label>
-          <input
-            type="text"
-            value={city}
-            onChange={(e) => onChange({ city: e.target.value })}
-            disabled={disabled}
-            className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 focus:border-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-60"
-          />
+      {/* City + State */}
+      {(city || state) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {city && (
+            <div>
+              <label className="block text-sm font-medium text-neutral-700 mb-1.5">
+                Town / City
+              </label>
+              <input
+                type="text"
+                value={city}
+                onChange={(e) => onChange({ city: e.target.value })}
+                disabled={disabled}
+                className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 focus:border-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-60"
+              />
+            </div>
+          )}
+          {state && (
+            <div>
+              <label className="block text-sm font-medium text-neutral-700 mb-1.5">
+                County / Region
+              </label>
+              <input
+                type="text"
+                value={state}
+                onChange={(e) => onChange({ state: e.target.value })}
+                disabled={disabled}
+                placeholder="Optional"
+                className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-60"
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
