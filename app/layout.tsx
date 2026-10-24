@@ -1,17 +1,13 @@
 // app/layout.tsx
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Sora } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./components/providers/Providers";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const sora = Sora({
+  variable: "--font-sora",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -26,11 +22,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col bg-gradient-to-br from-amber-50 via-white to-amber-50">
+    <html lang="en" className={`${sora.variable} h-full antialiased`}>
+      <body className="font-sans min-h-full flex flex-col bg-gradient-to-br from-amber-50 via-white to-amber-50">
         <Providers>{children}</Providers>
       </body>
     </html>

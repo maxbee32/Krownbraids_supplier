@@ -21,7 +21,6 @@ export function SignupForm() {
 
     const formData = new FormData(e.currentTarget);
 
-    // ✅ Match your backend's SupplierRegistrationDTO
     const data = {
       fullName: formData.get("fullName") as string,
       email: formData.get("email") as string,
@@ -36,14 +35,13 @@ export function SignupForm() {
         body: JSON.stringify(data),
       });
 
-      const responseData = await response.json();
+      const responseData = await response.json().catch(() => ({}));
 
       if (!response.ok) {
         setError(responseData.message || "Registration failed");
         return;
       }
 
-      // ✅ Store token — backend returns it immediately
       if (responseData.token) {
         localStorage.setItem("adminToken", responseData.token);
         if (responseData.userId) {
@@ -54,10 +52,9 @@ export function SignupForm() {
         }
       }
 
-      // ✅ Redirect to OTP verification (backend sends OTP via email)
       router.push(`/verify-otp?email=${encodeURIComponent(data.email)}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+    } catch {
+      setError("Something went wrong. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -110,8 +107,9 @@ export function SignupForm() {
         <button
           type="button"
           onClick={() => setShowPassword(!showPassword)}
-          className="absolute right-3 top-[42px] text-neutral-400 hover:text-neutral-600 transition-colors"
+          className="absolute right-3 top-9 text-neutral-400 transition-colors hover:text-neutral-600"
           aria-label={showPassword ? "Hide password" : "Show password"}
+          aria-pressed={showPassword}
         >
           {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
         </button>
@@ -123,9 +121,9 @@ export function SignupForm() {
           name="terms"
           type="checkbox"
           required
-          className="w-4 h-4 mt-0.5 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900"
+          className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900"
         />
-        <label htmlFor="terms" className="text-sm text-neutral-600">
+        <label htmlFor="terms" className="text-sm leading-relaxed text-neutral-600">
           I agree to the{" "}
           <Link href="/terms" className="font-medium text-neutral-900 hover:underline">
             Terms of Service
@@ -138,8 +136,11 @@ export function SignupForm() {
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 p-3 rounded-lg border border-red-200">
-          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
           <span>{error}</span>
         </div>
       )}
@@ -152,7 +153,7 @@ export function SignupForm() {
         Already have an account?{" "}
         <Link
           href="/login"
-          className="text-neutral-900 hover:underline font-semibold transition-colors"
+          className="font-semibold text-neutral-900 transition-colors hover:underline"
         >
           Sign in
         </Link>

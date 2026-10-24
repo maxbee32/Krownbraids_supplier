@@ -1,7 +1,7 @@
 // app/dashboard/orders/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   MagnifyingGlassIcon,
   EyeIcon,
@@ -10,6 +10,8 @@ import {
   CheckCircleIcon,
   XCircleIcon,
   FunnelIcon,
+  ArrowTrendingUpIcon,
+  ArrowTrendingDownIcon,
 } from "@heroicons/react/24/outline";
 import { MOCK_ORDERS, type Order } from "./mockOrders";
 import { OrderDetailDrawer } from "./OrderDetailDrawer";
@@ -85,6 +87,50 @@ function StatusIcon({ status }: { status: Order["status"] }) {
   }
 }
 
+// ─────────────────────────────────────────
+// Revenue trend helpers
+// ─────────────────────────────────────────
+
+interface DayBucket {
+  date: Date;
+  revenue: number;
+  count: number;
+}
+
+function buildDailySeries(orders: Order[], days: number): DayBucket[] {
+  const buckets: DayBucket[] = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    buckets.push({ date: d, revenue: 0, count: 0 });
+  }
+
+  for (const order of orders) {
+    if (order.status === "CANCELLED") continue;
+    if (!order.createdAt) continue;
+
+    const created = new Date(order.createdAt);
+    created.setHours(0, 0, 0, 0);
+
+    const bucket = buckets.find(
+      (b) => b.date.getTime() === created.getTime()
+    );
+    if (bucket) {
+      bucket.revenue += order.total;
+      bucket.count += 1;
+    }
+  }
+
+  return buckets;
+}
+
+// ─────────────────────────────────────────
+// Page
+// ─────────────────────────────────────────
+
 export default function OrdersPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("ALL");
@@ -112,47 +158,123 @@ export default function OrdersPage() {
     return matchesStatus && matchesSearch;
   });
 
-  const stats = {
-    total: MOCK_ORDERS.length,
-    pending: MOCK_ORDERS.filter(
-      (o) => o.status === "PENDING" || o.status === "PROCESSING"
-    ).length,
-    shipped: MOCK_ORDERS.filter((o) => o.status === "SHIPPED").length,
-    delivered: MOCK_ORDERS.filter((o) => o.status === "DELIVERED").length,
-    revenue: MOCK_ORDERS.filter((o) => o.status !== "CANCELLED").reduce(
-      (sum, o) => sum + o.total,
-      0
-    ),
-  };
+  const stats = useMemo(() => {
+    const active = MOCK_ORDERS.filter((o) => o.status !== "CANCELLED");
+    const revenue = active.reduce((sum, o) => sum + o.total, 0);
+    const avgOrder = active.length > 0 ? revenue / active.length : 0;
+
+    return {
+      total: MOCK_ORDERS.length,
+      pending: MOCK_ORDERS.filter(
+        (o) => o.status === "PENDING" || o.status === "PROCESSING"
+      ).length,
+      shipped: MOCK_ORDERS.filter((o) => o.status === "SHIPPED").length,
+      delivered: MOCK_ORDERS.filter((o) => o.status === "DELIVERED").length,
+      revenue,
+      avgOrder,
+    };
+  }, []);
+
+  // Build 14-day trend
+  const series = useMemo(() => buildDailySeries(MOCK_ORDERS, 14), []);
+
+  const last7 = series.slice(-7).reduce((s, b) => s + b.revenue, 0);
+  const prev7 = series.slice(0, 7).reduce((s, b) => s + b.revenue, 0);
+
+  const trendPct =
+    prev7 > 0 ? ((last7 - prev7) / prev7) * 100 : last7 > 0 ? 100 : 0;
+  const isUp = trendPct >= 0;
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-neutral-900 tracking-tight">
-          Orders
-        </h1>
-        <p className="text-neutral-600 mt-1 text-sm">
-          Track and manage customer orders
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-neutral-900 tracking-tight">
+            Orders
+          </h1>
+          <p className="text-neutral-600 mt-1 text-sm">
+            Track and manage customer orders
+          </p>
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatBox label="Total Orders" value={String(stats.total)} />
-        <StatBox
-          label="Awaiting"
-          value={String(stats.pending)}
-          accent="text-orange-600"
-        />
+      {/* ─────────── Trend + stats ─────────── */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Trend card (2/3 on desktop) */}
+        <div className="lg:col-span-2 rounded-2xl border border-neutral-200 bg-white p-5 sm:p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                Revenue · last 14 days
+              </p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-neutral-900">
+                {money(last7 + prev7)}
+              </p>
+              <div
+                className={`mt-1 inline-flex items-center gap-1 text-xs font-medium ${
+                  isUp ? "text-emerald-600" : "text-red-600"
+                }`}
+              >
+                {isUp ? (
+                  <ArrowTrendingUpIcon className="h-3.5 w-3.5" />
+                ) : (
+                  <ArrowTrendingDownIcon className="h-3.5 w-3.5" />
+                )}
+                {isUp ? "+" : ""}
+                {trendPct.toFixed(1)}% vs previous 7 days
+              </div>
+            </div>
+            <div className="hidden text-right sm:block">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                Orders in period
+              </p>
+              <p className="mt-2 text-lg font-semibold text-neutral-900">
+                {series.reduce((s, b) => s + b.count, 0)}
+              </p>
+            </div>
+          </div>
+
+          {/* Sparkline */}
+          <div className="mt-4">
+            <Sparkline data={series.map((b) => b.revenue)} />
+          </div>
+
+          {/* Day labels */}
+          <div className="mt-2 flex justify-between text-[10px] text-neutral-400">
+            <span>{formatDate(series[0]?.date.toISOString() ?? null)}</span>
+            <span>Today</span>
+          </div>
+        </div>
+
+        {/* Right column — two stacked stats */}
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-1">
+          <StatBox
+            label="Awaiting action"
+            value={String(stats.pending)}
+            accent="text-orange-600"
+            subtitle="Pending + processing"
+          />
+          <StatBox
+            label="Avg order"
+            value={money(stats.avgOrder)}
+            accent="text-neutral-900"
+            subtitle={`${stats.total} total orders`}
+          />
+        </div>
+      </div>
+
+      {/* Second row of stats */}
+      <div className="grid grid-cols-3 gap-4">
+        <StatBox label="Total" value={String(stats.total)} />
         <StatBox
           label="Shipped"
           value={String(stats.shipped)}
           accent="text-blue-600"
         />
         <StatBox
-          label="Revenue"
-          value={money(stats.revenue)}
+          label="Delivered"
+          value={String(stats.delivered)}
           accent="text-green-600"
         />
       </div>
@@ -298,14 +420,108 @@ export default function OrdersPage() {
   );
 }
 
+// ─────────────────────────────────────────
+// Sparkline
+// ─────────────────────────────────────────
+
+function Sparkline({
+  data,
+  width = 400,
+  height = 60,
+}: {
+  data: number[];
+  width?: number;
+  height?: number;
+}) {
+  if (data.length === 0) return null;
+
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+
+  const stepX = width / (data.length - 1 || 1);
+  const points = data.map((v, i) => {
+    const x = i * stepX;
+    const y = height - ((v - min) / range) * height;
+    return { x, y, v };
+  });
+
+  // Smooth curve through the points using quadratic midpoints
+  let path = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const curr = points[i];
+    const midX = (prev.x + curr.x) / 2;
+    path += ` Q ${prev.x} ${prev.y} ${midX} ${midY(prev, curr)}`;
+    path += ` T ${curr.x} ${curr.y}`;
+  }
+
+  // Simpler: use straight lines
+  const linePath = points
+    .map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`))
+    .join(" ");
+
+  const fillPath = `${linePath} L ${width} ${height} L 0 ${height} Z`;
+
+  // Find the last point for the dot
+  const last = points[points.length - 1];
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      className="w-full"
+      preserveAspectRatio="none"
+      style={{ height: `${height}px` }}
+    >
+      {/* Gradient fill */}
+      <defs>
+        <linearGradient id="revenueGradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+          <stop offset="100%" stopColor="#10b981" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* Filled area under the line */}
+      <path d={fillPath} fill="url(#revenueGradient)" />
+
+      {/* The line itself */}
+      <path
+        d={linePath}
+        fill="none"
+        stroke="#10b981"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+
+      {/* End dot */}
+      <circle cx={last.x} cy={last.y} r="3" fill="#10b981" />
+    </svg>
+  );
+}
+
+function midY(
+  prev: { x: number; y: number },
+  curr: { x: number; y: number }
+): number {
+  return (prev.y + curr.y) / 2;
+}
+
+// ─────────────────────────────────────────
+// Stat box
+// ─────────────────────────────────────────
+
 function StatBox({
   label,
   value,
   accent,
+  subtitle,
 }: {
   label: string;
   value: string;
   accent?: string;
+  subtitle?: string;
 }) {
   return (
     <div className="bg-white border border-neutral-200 rounded-2xl p-4 sm:p-5">
@@ -319,6 +535,11 @@ function StatBox({
       >
         {value}
       </p>
+      {subtitle && (
+        <p className="text-[10px] text-neutral-400 mt-1 truncate">
+          {subtitle}
+        </p>
+      )}
     </div>
   );
 }

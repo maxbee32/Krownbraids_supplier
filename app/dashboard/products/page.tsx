@@ -9,6 +9,9 @@ import {
   TrashIcon,
   XMarkIcon,
   PhotoIcon,
+  TruckIcon,
+  CheckCircleIcon,
+  ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
 import { ProductFormModal } from "./ProductFormModal";
 
@@ -22,27 +25,40 @@ export interface Product {
   compareAtPrice: number | null;
   stockQuantity: number;
   lowStockThreshold: number | null;
+  estimatedDeliveryDays: number | null;
   imageUrl: string | null;
   status: string;
   createdAt: string | null;
   updatedAt: string | null;
-}
 
-const SUPPLIER_SERVICE_PUBLIC_URL =
-  process.env.NEXT_PUBLIC_SUPPLIER_SERVICE_URL ||
-  "https://5836-82-36-98-104.ngrok-free.app/supservice";
+  baseCommissionRate: number | null;
+  categoryCommissionType: string | null;
+  categoryCommissionRate: number | null;
+}
 
 function imageSrc(url: string | null): string | null {
   if (!url) return null;
-  // Blob URLs (local previews) — leave alone
   if (url.startsWith("blob:")) return url;
-  // Absolute URLs (external CDNs, etc.) — leave alone
+
+  const suppliersIdx = url.indexOf("/images/suppliers/");
+  if (suppliersIdx !== -1) {
+    return `/api/uploads/${url.substring(suppliersIdx + "/images/suppliers/".length)}`;
+  }
+
+  const uploadsProductsIdx = url.indexOf("/uploads/products/");
+  if (uploadsProductsIdx !== -1) {
+    return `/api/uploads/${url.substring(uploadsProductsIdx + "/uploads/products/".length)}`;
+  }
+
+  if (url.startsWith("/") && !url.startsWith("//")) {
+    return `/api/uploads${url}`;
+  }
+
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  // Local uploads: /uploads/... → proxy through Next.js
-  if (url.startsWith("/uploads/")) return `/api${url}`;
-  // Fallback — treat as a Next.js relative path
+
   return url;
 }
+
 function formatCurrency(value: number | null | undefined): string {
   if (value == null) return "—";
   return `£${Number(value).toFixed(2)}`;
@@ -64,6 +80,41 @@ function stockLabel(product: Product): string {
   return `${product.stockQuantity} in stock`;
 }
 
+function deliveryLabel(product: Product): string | null {
+  const days = product.estimatedDeliveryDays;
+  if (days == null) return null;
+  if (days <= 0) return "Ships same day";
+  if (days === 1) return "Ships next day";
+  return `Ships in ${days} days`;
+}
+
+function computeProductNet(product: Product): {
+  gross: number;
+  baseCommission: number;
+  categoryCommission: number;
+  totalCommission: number;
+  net: number;
+  isWig: boolean;
+} {
+  const gross = Number(product.price) || 0;
+  const baseRate = Number(product.baseCommissionRate ?? 0);
+  const categoryRate = Number(product.categoryCommissionRate ?? 0);
+
+  const baseCommission = +(gross * baseRate).toFixed(2);
+  const categoryCommission = +(gross * categoryRate).toFixed(2);
+  const totalCommission = +(baseCommission + categoryCommission).toFixed(2);
+  const net = +(gross - totalCommission).toFixed(2);
+
+  return {
+    gross,
+    baseCommission,
+    categoryCommission,
+    totalCommission,
+    net,
+    isWig: product.categoryCommissionType === "WIG_SALE",
+  };
+}
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +122,7 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("");
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [alert, setAlert] = useState<{
     type: "success" | "error";
@@ -118,7 +170,6 @@ export default function ProductsPage() {
   }, []);
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this product? This cannot be undone.")) return;
     const token = localStorage.getItem("adminToken");
     if (!token) return;
 
@@ -139,6 +190,7 @@ export default function ProductsPage() {
       showAlert("error", "Failed to delete");
     } finally {
       setDeletingId(null);
+      setConfirmingId(null);
     }
   };
 
@@ -149,6 +201,7 @@ export default function ProductsPage() {
 
   const openEdit = (product: Product) => {
     setEditing(product);
+    setConfirmingId(null);
     setModalOpen(true);
   };
 
@@ -203,14 +256,24 @@ export default function ProductsPage() {
       {/* Alert */}
       {alert && (
         <div
+          role="status"
           className={`p-3 rounded-xl flex items-center gap-3 text-sm border ${
             alert.type === "success"
               ? "bg-green-50 text-green-800 border-green-200"
               : "bg-red-50 text-red-700 border-red-200"
           }`}
         >
+          {alert.type === "success" ? (
+            <CheckCircleIcon className="h-4 w-4 flex-shrink-0" />
+          ) : (
+            <ExclamationTriangleIcon className="h-4 w-4 flex-shrink-0" />
+          )}
           <span className="flex-1">{alert.message}</span>
-          <button onClick={() => setAlert(null)}>
+          <button
+            onClick={() => setAlert(null)}
+            aria-label="Dismiss"
+            className="text-current opacity-60 hover:opacity-100 transition-opacity"
+          >
             <XMarkIcon className="h-4 w-4" />
           </button>
         </div>
@@ -266,13 +329,22 @@ export default function ProductsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((product) => {
             const src = imageSrc(product.imageUrl);
+            const delivery = deliveryLabel(product);
+            const isConfirming = confirmingId === product.id;
+            const isDeleting = deletingId === product.id;
+            const net = computeProductNet(product);
+
             return (
               <div
                 key={product.id}
-                className="bg-white border border-neutral-200 rounded-2xl overflow-hidden hover:border-neutral-300 hover:shadow-sm transition-all"
+                className={`bg-white border rounded-2xl overflow-hidden transition-all ${
+                  isConfirming
+                    ? "border-red-300 ring-2 ring-red-100"
+                    : "border-neutral-200 hover:border-neutral-300 hover:shadow-sm"
+                }`}
               >
                 {/* Image */}
-                <div className="aspect-video bg-neutral-100 flex items-center justify-center overflow-hidden">
+                <div className="aspect-[4/3] bg-neutral-100 flex items-center justify-center overflow-hidden">
                   {src ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
@@ -319,24 +391,79 @@ export default function ProductsPage() {
                     </span>
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex gap-2 pt-2 border-t border-neutral-100">
-                    <button
-                      onClick={() => openEdit(product)}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-100 px-2 py-1.5 rounded-lg transition-colors"
-                    >
-                      <PencilSquareIcon className="h-3.5 w-3.5" />
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(product.id)}
-                      disabled={deletingId === product.id}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-                    >
-                      <TrashIcon className="h-3.5 w-3.5" />
-                      {deletingId === product.id ? "Deleting…" : "Delete"}
-                    </button>
+                  {/* Delivery estimate */}
+                  {delivery && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-neutral-500">
+                      <TruckIcon className="h-3.5 w-3.5 flex-shrink-0" />
+                      <span>{delivery}</span>
+                    </div>
+                  )}
+
+                  {/* You receive */}
+                  <div className="flex items-center justify-between rounded-lg bg-neutral-50 px-2.5 py-1.5 text-[11px]">
+                    <span className="text-neutral-500">You receive</span>
+                    <span className="font-semibold text-emerald-700">
+                      {formatCurrency(net.net)}
+                    </span>
                   </div>
+
+                  {/* Actions — normal */}
+                  {!isConfirming && (
+                    <div className="flex gap-2 pt-2 border-t border-neutral-100">
+                      <button
+                        onClick={() => openEdit(product)}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-medium text-neutral-700 hover:text-neutral-900 hover:bg-neutral-100 px-2 py-1.5 rounded-lg transition-colors"
+                      >
+                        <PencilSquareIcon className="h-3.5 w-3.5" />
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => setConfirmingId(product.id)}
+                        className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-medium text-neutral-500 hover:text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-colors"
+                      >
+                        <TrashIcon className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Actions — confirm delete */}
+                  {isConfirming && (
+                    <div className="pt-3 border-t border-red-100">
+                      <p className="text-[11px] font-medium text-red-700 mb-2">
+                        Delete this product?
+                      </p>
+                      <p className="text-[10px] text-red-600 mb-3">
+                        This can&apos;t be undone.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setConfirmingId(null)}
+                          disabled={isDeleting}
+                          className="flex-1 text-xs font-medium text-neutral-700 bg-white border border-neutral-200 hover:bg-neutral-50 px-2 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => handleDelete(product.id)}
+                          disabled={isDeleting}
+                          className="flex-1 inline-flex items-center justify-center gap-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 px-2 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {isDeleting ? (
+                            <>
+                              <div className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                              Deleting…
+                            </>
+                          ) : (
+                            <>
+                              <TrashIcon className="h-3.5 w-3.5" />
+                              Delete
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );

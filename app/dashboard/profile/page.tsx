@@ -1,7 +1,8 @@
 // app/dashboard/profile/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Building2,
   Mail,
@@ -16,6 +17,10 @@ import {
   Pencil,
   X,
   Save,
+  AlertCircle,
+  KeyRound,
+  ExternalLink,
+  AlertTriangle,
 } from "lucide-react";
 
 interface BusinessProfile {
@@ -37,6 +42,8 @@ interface BusinessProfile {
   billingCycle: string | null;
   status: string | null;
   onboardingCompleted: boolean;
+  subscriptionStartDate?: string | null;
+  subscriptionEndDate?: string | null;
 }
 
 interface StoredSupplier {
@@ -78,14 +85,27 @@ function buildFormState(profile: BusinessProfile): FormState {
   };
 }
 
+function daysRemaining(endDate: string | null | undefined): number | null {
+  if (!endDate) return null;
+  const end = new Date(endDate).getTime();
+  if (Number.isNaN(end)) return null;
+  return Math.ceil((end - Date.now()) / (1000 * 60 * 60 * 24));
+}
+
+function validateEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 export default function ProfilePage() {
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
   const [supplier, setSupplier] = useState<StoredSupplier | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
+  const [initialForm, setInitialForm] = useState<FormState | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [alert, setAlert] = useState<{
     type: "success" | "error";
     message: string;
@@ -127,7 +147,9 @@ export default function ProfilePage() {
           throw new Error(data.message || "Failed to load profile");
         }
         setProfile(data.data);
-        setForm(buildFormState(data.data));
+        const fs = buildFormState(data.data);
+        setForm(fs);
+        setInitialForm(fs);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load profile");
       } finally {
@@ -138,17 +160,73 @@ export default function ProfilePage() {
     load();
   }, []);
 
+  const isDirty = useMemo(() => {
+    if (!form || !initialForm) return false;
+    return JSON.stringify(form) !== JSON.stringify(initialForm);
+  }, [form, initialForm]);
+
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
+    // Clear field error when user starts typing
+    if (fieldErrors[key]) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
+  const handleEdit = () => {
+    setEditing(true);
+    setFieldErrors({});
   };
 
   const handleCancel = () => {
-    if (profile) setForm(buildFormState(profile));
+    if (isDirty) {
+      const ok = window.confirm(
+        "You have unsaved changes. Discard them?"
+      );
+      if (!ok) return;
+    }
+    if (initialForm) setForm(initialForm);
     setEditing(false);
+    setFieldErrors({});
+  };
+
+  const validate = (f: FormState): Record<string, string> => {
+    const errors: Record<string, string> = {};
+
+    if (!f.companyName.trim()) {
+      errors.companyName = "Company name is required";
+    }
+    if (!f.email.trim()) {
+      errors.email = "Email is required";
+    } else if (!validateEmail(f.email)) {
+      errors.email = "Enter a valid email address";
+    }
+    if (f.website && !/^https?:\/\//i.test(f.website)) {
+      errors.website = "Website must start with http:// or https://";
+    }
+
+    return errors;
   };
 
   const handleSave = async () => {
     if (!form) return;
+
+    const errors = validate(form);
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      showAlert("error", "Please fix the highlighted fields");
+      return;
+    }
+
+    if (!isDirty) {
+      setEditing(false);
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
@@ -166,19 +244,19 @@ export default function ProfilePage() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          companyName: form.companyName,
+          companyName: form.companyName.trim(),
           companyType: form.companyType,
-          description: form.description,
-          email: form.email,
-          phoneNumber: form.phoneNumber,
-          website: form.website,
-          address: form.address,
-          city: form.city,
-          state: form.state,
+          description: form.description.trim(),
+          email: form.email.trim(),
+          phoneNumber: form.phoneNumber.trim(),
+          website: form.website.trim(),
+          address: form.address.trim(),
+          city: form.city.trim(),
+          state: form.state.trim(),
           country: form.country,
-          postalCode: form.postalCode,
-          registrationNumber: form.registrationNumber,
-          taxId: form.taxId,
+          postalCode: form.postalCode.trim(),
+          registrationNumber: form.registrationNumber.trim(),
+          taxId: form.taxId.trim(),
         }),
       });
 
@@ -195,8 +273,11 @@ export default function ProfilePage() {
       }
 
       setProfile(data.data);
-      setForm(buildFormState(data.data));
+      const fs = buildFormState(data.data);
+      setForm(fs);
+      setInitialForm(fs);
       setEditing(false);
+      setFieldErrors({});
       showAlert("success", "Profile updated successfully");
     } catch (err) {
       showAlert("error", err instanceof Error ? err.message : "Failed to save");
@@ -216,14 +297,18 @@ export default function ProfilePage() {
   if (error && !profile) {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm">
-          {error}
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700 text-sm flex items-start gap-2">
+          <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          <span>{error}</span>
         </div>
       </div>
     );
   }
 
   if (!profile || !form) return null;
+
+  const days = daysRemaining(profile.subscriptionEndDate);
+  const isExpired = days !== null && days <= 0;
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-6">
@@ -234,12 +319,14 @@ export default function ProfilePage() {
             Business Profile
           </h1>
           <p className="text-neutral-600 mt-1 text-sm">
-            Your registered business information
+            {editing
+              ? "Edit your business information"
+              : "Your registered business information"}
           </p>
         </div>
         {!editing ? (
           <button
-            onClick={() => setEditing(true)}
+            onClick={handleEdit}
             className="inline-flex items-center gap-2 bg-neutral-900 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors flex-shrink-0"
           >
             <Pencil className="h-4 w-4" />
@@ -257,7 +344,7 @@ export default function ProfilePage() {
             </button>
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || !isDirty}
               className="inline-flex items-center gap-2 bg-neutral-900 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
@@ -276,8 +363,17 @@ export default function ProfilePage() {
               : "bg-red-50 text-red-700 border-red-200"
           }`}
         >
+          {alert.type === "success" ? (
+            <CheckCircle className="h-4 w-4 flex-shrink-0" />
+          ) : (
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          )}
           <span className="flex-1">{alert.message}</span>
-          <button onClick={() => setAlert(null)}>
+          <button
+            onClick={() => setAlert(null)}
+            className="text-current opacity-60 hover:opacity-100"
+            aria-label="Dismiss"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -285,12 +381,13 @@ export default function ProfilePage() {
 
       {/* Company */}
       <Section title="Company" icon={<Building2 className="h-4 w-4" />}>
-        <Field label="Company name">
+        <Field label="Company name" required error={fieldErrors.companyName}>
           {editing ? (
             <Input
               value={form.companyName}
               onChange={(v) => setField("companyName", v)}
               placeholder="Your business name"
+              hasError={!!fieldErrors.companyName}
             />
           ) : (
             <ReadOnly value={profile.companyName} />
@@ -332,13 +429,14 @@ export default function ProfilePage() {
 
       {/* Contact */}
       <Section title="Contact" icon={<Mail className="h-4 w-4" />}>
-        <Field label="Email" icon={<Mail className="h-3.5 w-3.5" />}>
+        <Field label="Email" icon={<Mail className="h-3.5 w-3.5" />} required error={fieldErrors.email}>
           {editing ? (
             <Input
               type="email"
               value={form.email}
               onChange={(v) => setField("email", v)}
               placeholder="business@example.com"
+              hasError={!!fieldErrors.email}
             />
           ) : (
             <ReadOnly value={profile.email} />
@@ -358,22 +456,24 @@ export default function ProfilePage() {
           )}
         </Field>
 
-        <Field label="Website" icon={<Globe className="h-3.5 w-3.5" />}>
+        <Field label="Website" icon={<Globe className="h-3.5 w-3.5" />} error={fieldErrors.website}>
           {editing ? (
             <Input
               type="url"
               value={form.website}
               onChange={(v) => setField("website", v)}
               placeholder="https://yourbusiness.com"
+              hasError={!!fieldErrors.website}
             />
           ) : profile.website ? (
             <a
               href={profile.website}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-sm text-blue-600 hover:underline break-all"
+              className="text-sm text-blue-600 hover:underline break-all inline-flex items-center gap-1"
             >
               {profile.website}
+              <ExternalLink className="h-3 w-3 flex-shrink-0" />
             </a>
           ) : (
             <ReadOnly value={null} />
@@ -473,7 +573,7 @@ export default function ProfilePage() {
         </Field>
       </Section>
 
-      {/* Account (read-only) */}
+      {/* Account */}
       <Section title="Account" icon={<ShieldCheck className="h-4 w-4" />}>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
@@ -492,7 +592,7 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-sm mt-2">
+        <div className="flex items-center gap-2 text-sm">
           <CheckCircle className="h-4 w-4 text-green-600" />
           <span className="text-neutral-700">
             {profile.onboardingCompleted
@@ -500,9 +600,17 @@ export default function ProfilePage() {
               : "Onboarding in progress"}
           </span>
         </div>
+
+        <Link
+          href="/dashboard/settings/password"
+          className="inline-flex items-center gap-1.5 text-xs text-neutral-900 font-medium hover:underline"
+        >
+          <KeyRound className="h-3.5 w-3.5" />
+          Change password →
+        </Link>
       </Section>
 
-      {/* Subscription (read-only) */}
+      {/* Subscription */}
       <Section title="Subscription" icon={<CreditCard className="h-4 w-4" />}>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
@@ -523,13 +631,58 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <a
+        {isExpired && (
+          <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Subscription expired</p>
+              <p className="text-xs text-red-700 mt-0.5">
+                Renew your plan to keep your products listed and continue receiving orders.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!isExpired && days !== null && days <= 7 && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <Clock className="h-4 w-4 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Ending in {days} day{days === 1 ? "" : "s"}</p>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Renew soon to avoid interruption to your sales.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <Link
           href="/dashboard/subscription"
-          className="inline-flex items-center gap-1.5 text-xs text-neutral-900 font-medium hover:underline mt-2"
+          className="inline-flex items-center gap-1.5 text-xs text-neutral-900 font-medium hover:underline"
         >
           <Clock className="h-3.5 w-3.5" />
           View subscription details →
-        </a>
+        </Link>
+      </Section>
+
+      {/* Danger zone */}
+      <Section title="Danger zone" icon={<AlertTriangle className="h-4 w-4 text-red-500" />}>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-neutral-900">
+              Deactivate your account
+            </p>
+            <p className="text-xs text-neutral-500 mt-0.5">
+              Your products will be hidden from the marketplace. Your data is kept
+              for 30 days in case you change your mind.
+            </p>
+          </div>
+          <Link
+            href="/contact?subject=deactivate-account"
+            className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 flex-shrink-0"
+          >
+            Contact support
+          </Link>
+        </div>
       </Section>
     </div>
   );
@@ -564,10 +717,14 @@ function Section({
 function Field({
   label,
   icon,
+  required,
+  error,
   children,
 }: {
   label: string;
   icon?: React.ReactNode;
+  required?: boolean;
+  error?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -576,9 +733,16 @@ function Field({
         {icon && <span className="text-neutral-400">{icon}</span>}
         <label className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">
           {label}
+          {required && <span className="text-red-500 ml-0.5">*</span>}
         </label>
       </div>
       {children}
+      {error && (
+        <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" />
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -611,11 +775,13 @@ function Input({
   onChange,
   placeholder,
   type = "text",
+  hasError,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   type?: string;
+  hasError?: boolean;
 }) {
   return (
     <input
@@ -623,7 +789,11 @@ function Input({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900 transition-colors"
+      className={`w-full bg-white border rounded-xl px-3 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 transition-colors ${
+        hasError
+          ? "border-red-300 focus:ring-red-500 focus:border-red-500"
+          : "border-neutral-200 focus:ring-neutral-900 focus:border-neutral-900"
+      }`}
     />
   );
 }

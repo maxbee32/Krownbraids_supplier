@@ -8,6 +8,13 @@ import { Input } from "../ui/Input";
 import { Button } from "../ui/Button";
 import { Eye, EyeOff, AlertCircle, CheckCircle } from "lucide-react";
 
+const STORAGE_KEYS = {
+  token: "adminToken",
+  userId: "userId",
+  supplierData: "supplierData",
+  userRole: "userRole",
+} as const;
+
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -18,16 +25,27 @@ export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [prefillEmail, setPrefillEmail] = useState("");
 
-  // ✅ Read query params from redirects
   useEffect(() => {
     const verified = searchParams.get("verified");
     const registered = searchParams.get("registered");
+    const reset = searchParams.get("reset");
+    const reason = searchParams.get("reason");
     const emailParam = searchParams.get("email");
 
     if (verified === "true") {
       setSuccess("Email verified successfully. Please sign in to continue.");
     } else if (registered === "true") {
       setSuccess("Account created. Please sign in to continue.");
+    } else if (reset === "true") {
+      setSuccess(
+        "Password reset successful. Please sign in with your new password."
+      );
+    } else if (reason === "expired") {
+      setError("Your session has expired. Please sign in again.");
+    } else if (reason === "missing") {
+      setError("Please sign in to continue.");
+    } else if (reason === "signed-out") {
+      setSuccess("You've been signed out.");
     }
 
     if (emailParam) {
@@ -42,7 +60,7 @@ export function LoginForm() {
     setSuccess("");
 
     const formData = new FormData(e.currentTarget);
-    const email = formData.get("email") as string;
+    const email = (formData.get("email") as string).trim();
     const password = formData.get("password") as string;
 
     try {
@@ -55,7 +73,7 @@ export function LoginForm() {
         body: JSON.stringify({ email, password }),
       });
 
-      const loginData = await loginResponse.json();
+      const loginData = await loginResponse.json().catch(() => ({}));
 
       if (!loginResponse.ok) {
         setError(loginData.message || "Invalid email or password");
@@ -68,15 +86,14 @@ export function LoginForm() {
         return;
       }
 
-      // ✅ Store token
-      localStorage.setItem("adminToken", token);
+      // Persist session
+      localStorage.setItem(STORAGE_KEYS.token, token);
 
-      // ✅ Store supplier info — read from BOTH field names for safety
       const supplierId = loginData.supplierId || loginData.userId;
       if (supplierId) {
-        localStorage.setItem("userId", String(supplierId));
+        localStorage.setItem(STORAGE_KEYS.userId, String(supplierId));
         localStorage.setItem(
-          "supplierData",
+          STORAGE_KEYS.supplierData,
           JSON.stringify({
             id: supplierId,
             fullName: loginData.fullName ?? null,
@@ -87,65 +104,85 @@ export function LoginForm() {
       }
 
       if (loginData.role) {
-        localStorage.setItem("userRole", loginData.role);
+        localStorage.setItem(STORAGE_KEYS.userRole, loginData.role);
       }
 
       // ─────────────────────────────────────────
       // STEP 2: Fetch onboarding status
       // ─────────────────────────────────────────
-      const statusResponse = await fetch("/api/auth/onboarding/status", {
-        method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      let statusData: {
+        data?: { onboardingCompleted?: boolean; status?: string };
+      } | null = null;
 
-      const statusData = await statusResponse.json();
+      try {
+        const statusResponse = await fetch("/api/auth/onboarding/status", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (statusResponse.ok) {
+          statusData = await statusResponse.json().catch(() => null);
+        }
+      } catch {
+        // Swallow — fall through to /onboarding
+      }
 
       // ─────────────────────────────────────────
       // STEP 3: Route based on onboarding state
       // ─────────────────────────────────────────
+      const status = statusData?.data;
 
-      // No business yet → start onboarding
-      if (!statusData.data) {
-        router.push("/onboarding");
+      // No business row yet → fresh account
+      if (!status) {
+        router.replace("/onboarding");
         return;
       }
 
-      const { onboardingCompleted, status } = statusData.data;
-
-      // Onboarding not finished → resume
-      if (!onboardingCompleted) {
-        router.push("/onboarding");
+      // Onboarding started but not complete → resume
+      if (!status.onboardingCompleted) {
+        router.replace("/onboarding");
         return;
       }
 
-      // Onboarding done, but pending admin review
-      if (status === "PENDING_APPROVAL" || status === "REVIEW") {
-        router.push("/pending-approval");
-        return;
-      }
+      // Onboarding complete → route by review status.
+      // IMPORTANT: only go to /dashboard for approved accounts.
+      // Every other state has an explicit destination.
+      switch (status.status) {
+        case "PAYMENT_CONFIRMED":
+        case "PENDING_APPROVAL":
+        case "REVIEW":
+          router.replace("/pending-approval");
+          return;
 
-      // Rejected / Declined → show rejection page
-      if (status === "REJECTED" || status === "DECLINED") {
-        router.push("/dashboard/rejected");
-        return;
-      }
+        case "REJECTED":
+        case "DECLINED":
+          router.replace("/reject");
+          return;
 
-      // Suspended
-      if (status === "SUSPENDED") {
-        router.push("/dashboard/suspended");
-        return;
-      }
+        case "SUSPENDED":
+          router.replace("/dashboard/suspended");
+          return;
 
-      // APPROVED or ACTIVE → full dashboard
-      if (status === "APPROVED" || status === "ACTIVE") {
-        router.push("/dashboard");
-        return;
-      }
+        case "APPROVED":
+        case "ACTIVE":
+          router.replace("/dashboard");
+          return;
 
-      // Fallback — treat as needing onboarding
-      router.push("/onboarding");
-    } catch (err) {
-      console.error("Login error:", err);
+        // In-progress states → back to onboarding
+        case "IN_PROGRESS":
+        case "BUSINESS":
+        case "PLAN":
+        case "PAYMENT":
+          router.replace("/onboarding");
+          return;
+
+        default:
+          // Unknown or undefined status — safest is onboarding.
+          // The onboarding bootstrap will re-check and route correctly.
+          router.replace("/onboarding");
+          return;
+      }
+    } catch {
       setError("Something went wrong. Please try again.");
     } finally {
       setIsLoading(false);
@@ -153,15 +190,19 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-6">
+    <form onSubmit={onSubmit} className="space-y-6" noValidate={false}>
       {success && (
-        <div className="flex items-start gap-2 text-sm text-green-700 bg-green-50 p-3 rounded-lg border border-green-200">
-          <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700"
+        >
+          <CheckCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
           <span>{success}</span>
         </div>
       )}
 
       <Input
+        key={prefillEmail}
         type="email"
         name="email"
         placeholder="Email address"
@@ -170,6 +211,9 @@ export function LoginForm() {
         label="Email Address"
         defaultValue={prefillEmail}
         autoComplete="email"
+        inputMode="email"
+        autoCapitalize="none"
+        spellCheck={false}
       />
 
       <div className="relative">
@@ -184,40 +228,48 @@ export function LoginForm() {
         />
         <button
           type="button"
-          onClick={() => setShowPassword(!showPassword)}
-          className="absolute right-3 top-[42px] text-neutral-400 hover:text-neutral-600 transition-colors"
+          onClick={() => setShowPassword((v) => !v)}
+          className="absolute right-3 top-9 text-neutral-400 transition-colors hover:text-neutral-600"
           aria-label={showPassword ? "Hide password" : "Show password"}
+          aria-pressed={showPassword}
+          tabIndex={0}
         >
           {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
         </button>
       </div>
 
-      {/* Remember me / Forgot password — responsive */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <label className="flex items-center gap-2 cursor-pointer">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <label className="flex cursor-pointer items-center gap-2">
           <input
             type="checkbox"
             name="remember"
-            className="w-4 h-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900"
+            className="h-4 w-4 rounded border-neutral-300 text-neutral-900 focus:ring-neutral-900"
           />
           <span className="text-sm text-neutral-600">Remember me</span>
         </label>
         <Link
           href="/forgot-password"
-          className="text-sm text-neutral-600 hover:text-neutral-900 transition-colors sm:text-right"
+          className="text-sm text-neutral-600 transition-colors hover:text-neutral-900 sm:text-right"
         >
           Forgot password?
         </Link>
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 p-3 rounded-lg border border-red-200">
-          <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
           <span>{error}</span>
         </div>
       )}
 
-      <Button type="submit" className="w-full justify-center" isLoading={isLoading}>
+      <Button
+        type="submit"
+        className="w-full justify-center"
+        isLoading={isLoading}
+      >
         {isLoading ? "Signing in..." : "Sign In"}
       </Button>
 
@@ -225,7 +277,7 @@ export function LoginForm() {
         Don&apos;t have an account?{" "}
         <Link
           href="/signup"
-          className="text-neutral-900 hover:underline font-semibold transition-colors"
+          className="font-semibold text-neutral-900 transition-colors hover:underline"
         >
           Sign up
         </Link>

@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   KeyRound,
   Bell,
-  Globe,
   Clock,
   LogOut,
   AlertTriangle,
@@ -15,7 +14,12 @@ import {
   Eye,
   EyeOff,
   Shield,
-  DollarSign,
+  ShieldCheck,
+  Monitor,
+  Download,
+  Trash2,
+  Mail,
+  Loader2,
 } from "lucide-react";
 
 interface StoredSupplier {
@@ -37,12 +41,6 @@ interface NotificationPrefs {
   marketingEmails: boolean;
 }
 
-interface Preferences {
-  language: string;
-  timezone: string;
-  currency: string;
-}
-
 const DEFAULT_NOTIFS: NotificationPrefs = {
   orderAlerts: true,
   payoutAlerts: true,
@@ -51,16 +49,8 @@ const DEFAULT_NOTIFS: NotificationPrefs = {
   marketingEmails: false,
 };
 
-const DEFAULT_PREFS: Preferences = {
-  language: "en-GB",
-  timezone: "Europe/London",
-  currency: "GBP",
-};
-
 const NOTIF_STORAGE_KEY = "supplier_notification_prefs";
-const PREFS_STORAGE_KEY = "supplier_preferences";
 
-// ─── Password validation ───
 function validatePassword(pw: string): string[] {
   const errors: string[] = [];
   if (pw.length < 8) errors.push("at least 8 characters");
@@ -119,13 +109,12 @@ export default function SettingsPage() {
   // Notification prefs
   const [notifs, setNotifs] = useState<NotificationPrefs>(DEFAULT_NOTIFS);
 
-  // General preferences
-  const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS);
-
   // Danger zone
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false);
   const [deactivateConfirmText, setDeactivateConfirmText] = useState("");
   const [deactivating, setDeactivating] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   // ─── Load stored data ───
   useEffect(() => {
@@ -135,17 +124,9 @@ export default function SettingsPage() {
     } catch {
       // ignore
     }
-
     try {
       const n = localStorage.getItem(NOTIF_STORAGE_KEY);
       if (n) setNotifs({ ...DEFAULT_NOTIFS, ...JSON.parse(n) });
-    } catch {
-      // ignore
-    }
-
-    try {
-      const p = localStorage.getItem(PREFS_STORAGE_KEY);
-      if (p) setPrefs({ ...DEFAULT_PREFS, ...JSON.parse(p) });
     } catch {
       // ignore
     }
@@ -233,25 +214,23 @@ export default function SettingsPage() {
     });
   };
 
-  // ─── Preference change ───
-  const updatePref = <K extends keyof Preferences>(
-    key: K,
-    value: Preferences[K]
-  ) => {
-    setPrefs((prev) => {
-      const next = { ...prev, [key]: value };
-      localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(next));
-      return next;
-    });
-    showAlert("success", "Preference saved.");
-  };
-
   // ─── Logout ───
   const handleLogout = () => {
-    localStorage.removeItem("adminToken");
-    localStorage.removeItem("supplierData");
-    window.dispatchEvent(new StorageEvent("storage", { key: "adminToken" }));
-    router.replace("/login");
+    [
+      "adminToken",
+      "adminData",
+      "userId",
+      "userRole",
+      "supplierData",
+      "checkoutId",
+    ].forEach((k) => {
+      try {
+        localStorage.removeItem(k);
+      } catch {
+        // ignore
+      }
+    });
+    router.replace("/login?reason=signed-out");
   };
 
   // ─── Deactivate ───
@@ -306,7 +285,7 @@ export default function SettingsPage() {
           Settings
         </h1>
         <p className="text-neutral-600 mt-1 text-sm">
-          Manage your account preferences
+          Manage your account security and notifications
         </p>
       </div>
 
@@ -325,7 +304,11 @@ export default function SettingsPage() {
             <AlertTriangle className="h-4 w-4 flex-shrink-0" />
           )}
           <span className="flex-1">{alert.message}</span>
-          <button onClick={() => setAlert(null)}>
+          <button
+            onClick={() => setAlert(null)}
+            aria-label="Dismiss"
+            className="opacity-60 hover:opacity-100"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -338,13 +321,17 @@ export default function SettingsPage() {
             {supplier?.fullName?.charAt(0)?.toUpperCase() || "S"}
           </span>
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-neutral-900 truncate">
             {supplier?.fullName || "Supplier"}
           </p>
           <p className="text-xs text-neutral-500 truncate">
             {supplier?.email || "—"}
           </p>
+        </div>
+        <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-[10px] font-medium text-green-700 flex-shrink-0">
+          <CheckCircle className="h-3 w-3" />
+          Verified
         </div>
       </div>
 
@@ -358,7 +345,6 @@ export default function SettingsPage() {
         </div>
         <div className="bg-white border border-neutral-200 rounded-2xl p-5">
           <form onSubmit={handlePasswordSubmit} className="space-y-4">
-            {/* Current */}
             <Field label="Current password">
               <div className="relative">
                 <input
@@ -383,6 +369,9 @@ export default function SettingsPage() {
                   }
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700"
                   tabIndex={-1}
+                  aria-label={
+                    showPasswords.current ? "Hide password" : "Show password"
+                  }
                 >
                   {showPasswords.current ? (
                     <EyeOff className="h-4 w-4" />
@@ -393,7 +382,6 @@ export default function SettingsPage() {
               </div>
             </Field>
 
-            {/* New */}
             <Field label="New password">
               <div className="relative">
                 <input
@@ -415,6 +403,9 @@ export default function SettingsPage() {
                   }
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700"
                   tabIndex={-1}
+                  aria-label={
+                    showPasswords.next ? "Hide password" : "Show password"
+                  }
                 >
                   {showPasswords.next ? (
                     <EyeOff className="h-4 w-4" />
@@ -438,7 +429,6 @@ export default function SettingsPage() {
               )}
             </Field>
 
-            {/* Confirm */}
             <Field label="Confirm new password">
               <div className="relative">
                 <input
@@ -463,6 +453,9 @@ export default function SettingsPage() {
                   }
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700"
                   tabIndex={-1}
+                  aria-label={
+                    showPasswords.confirm ? "Hide password" : "Show password"
+                  }
                 >
                   {showPasswords.confirm ? (
                     <EyeOff className="h-4 w-4" />
@@ -479,11 +472,81 @@ export default function SettingsPage() {
                 disabled={passwordSaving}
                 className="inline-flex items-center gap-2 bg-neutral-900 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Shield className="h-4 w-4" />
-                {passwordSaving ? "Updating…" : "Update Password"}
+                {passwordSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Updating…
+                  </>
+                ) : (
+                  <>
+                    <Shield className="h-4 w-4" />
+                    Update Password
+                  </>
+                )}
               </button>
             </div>
           </form>
+        </div>
+      </section>
+
+      {/* Two-factor authentication */}
+      <section>
+        <div className="flex items-center gap-2 mb-3">
+          <ShieldCheck className="h-4 w-4 text-neutral-500" />
+          <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
+            Security
+          </h2>
+        </div>
+        <div className="bg-white border border-neutral-200 rounded-2xl divide-y divide-neutral-100">
+          <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-neutral-900">
+                Two-factor authentication
+              </p>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Add an extra layer of security to your account
+              </p>
+            </div>
+            <span className="flex-shrink-0 rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-[10px] font-medium text-neutral-600">
+              Coming soon
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-neutral-900">
+                Active sessions
+              </p>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Manage devices currently signed in to your account
+              </p>
+            </div>
+            <button
+              onClick={() => showAlert("success", "Session management coming soon.")}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-700 hover:text-neutral-900 flex-shrink-0"
+            >
+              <Monitor className="h-3.5 w-3.5" />
+              View
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-neutral-900">
+                Login history
+              </p>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                See recent logins with device and location
+              </p>
+            </div>
+            <button
+              onClick={() => showAlert("success", "Login history coming soon.")}
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-700 hover:text-neutral-900 flex-shrink-0"
+            >
+              <Clock className="h-3.5 w-3.5" />
+              View
+            </button>
+          </div>
         </div>
       </section>
 
@@ -529,50 +592,55 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Preferences */}
+      {/* Data & privacy */}
       <section>
         <div className="flex items-center gap-2 mb-3">
-          <Globe className="h-4 w-4 text-neutral-500" />
+          <Download className="h-4 w-4 text-neutral-500" />
           <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
-            Preferences
+            Data & Privacy
           </h2>
         </div>
         <div className="bg-white border border-neutral-200 rounded-2xl divide-y divide-neutral-100">
-          <SelectRow
-            icon={<Globe className="h-4 w-4" />}
-            label="Language"
-            value={prefs.language}
-            options={[
-              { value: "en-GB", label: "English (UK)" },
-              { value: "en-US", label: "English (US)" },
-              { value: "fr-FR", label: "Français" },
-              { value: "es-ES", label: "Español" },
-            ]}
-            onChange={(v) => updatePref("language", v)}
-          />
-          <SelectRow
-            icon={<Clock className="h-4 w-4" />}
-            label="Timezone"
-            value={prefs.timezone}
-            options={[
-              { value: "Europe/London", label: "London (GMT/BST)" },
-              { value: "Europe/Paris", label: "Paris (CET)" },
-              { value: "America/New_York", label: "New York (EST)" },
-              { value: "Africa/Accra", label: "Accra (GMT)" },
-            ]}
-            onChange={(v) => updatePref("timezone", v)}
-          />
-          <SelectRow
-            icon={<DollarSign className="h-4 w-4" />}
-            label="Currency display"
-            value={prefs.currency}
-            options={[
-              { value: "GBP", label: "British Pound (£)" },
-              { value: "USD", label: "US Dollar ($)" },
-              { value: "EUR", label: "Euro (€)" },
-            ]}
-            onChange={(v) => updatePref("currency", v)}
-          />
+          <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-neutral-900">
+                Export your data
+              </p>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Download a copy of your products, orders, and account details
+              </p>
+            </div>
+            <button
+              onClick={() =>
+                showAlert(
+                  "success",
+                  "We'll email you a download link within 24 hours."
+                )
+              }
+              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 flex-shrink-0"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Request
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-neutral-900">
+                Privacy policy
+              </p>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Read how we handle your data
+              </p>
+            </div>
+            <a
+              href="/privacy"
+              className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-700 hover:text-neutral-900 flex-shrink-0"
+            >
+              <Mail className="h-3.5 w-3.5" />
+              Open
+            </a>
+          </div>
         </div>
       </section>
 
@@ -605,7 +673,7 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Danger zone — red tinted */}
+      {/* Danger zone */}
       <section>
         <div className="flex items-center gap-2 mb-3">
           <AlertTriangle className="h-4 w-4 text-red-600" />
@@ -613,23 +681,50 @@ export default function SettingsPage() {
             Danger Zone
           </h2>
         </div>
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-red-900">
-                Deactivate account
-              </p>
-              <p className="text-xs text-red-700 mt-1">
-                Your products and orders will be hidden. Contact support to
-                reactivate.
-              </p>
+        <div className="bg-red-50 border border-red-200 rounded-2xl divide-y divide-red-100">
+          {/* Deactivate */}
+          <div className="p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-red-900">
+                  Deactivate account
+                </p>
+                <p className="text-xs text-red-700 mt-1">
+                  Your products and orders will be hidden from the marketplace.
+                  Contact support to reactivate later. Your data is kept
+                  indefinitely while deactivated.
+                </p>
+              </div>
+              <button
+                onClick={() => setDeactivateModalOpen(true)}
+                className="inline-flex items-center gap-2 bg-white border border-red-200 text-red-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-red-100 transition-colors flex-shrink-0"
+              >
+                Deactivate
+              </button>
             </div>
-            <button
-              onClick={() => setDeactivateModalOpen(true)}
-              className="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-red-700 transition-colors flex-shrink-0"
-            >
-              Deactivate
-            </button>
+          </div>
+
+          {/* Delete */}
+          <div className="p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-red-900">
+                  Delete account permanently
+                </p>
+                <p className="text-xs text-red-700 mt-1">
+                  Permanently delete your account and all associated data
+                  (products, orders, profile). This cannot be undone. Existing
+                  orders are retained for legal/tax requirements.
+                </p>
+              </div>
+              <button
+                onClick={() => setDeleteModalOpen(true)}
+                className="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-red-700 transition-colors flex-shrink-0"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -649,7 +744,6 @@ export default function SettingsPage() {
               className="w-full max-w-md bg-white border border-neutral-200 rounded-2xl shadow-2xl pointer-events-auto overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Red-tinted header */}
               <div className="p-5 border-b border-red-100 bg-red-50">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
@@ -660,7 +754,7 @@ export default function SettingsPage() {
                       Deactivate account?
                     </h3>
                     <p className="text-xs text-red-700 mt-0.5">
-                      This action can be reversed by contacting support.
+                      This can be reversed by contacting support.
                     </p>
                   </div>
                 </div>
@@ -702,6 +796,96 @@ export default function SettingsPage() {
                   className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {deactivating ? "Deactivating…" : "Deactivate"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Delete modal */}
+      {deleteModalOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40"
+            onClick={() => {
+              setDeleteModalOpen(false);
+              setDeleteConfirmText("");
+            }}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+            <div
+              className="w-full max-w-md bg-white border border-neutral-200 rounded-2xl shadow-2xl pointer-events-auto overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-5 border-b border-red-100 bg-red-50">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                    <Trash2 className="h-5 w-5 text-red-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-red-900">
+                      Delete account permanently?
+                    </h3>
+                    <p className="text-xs text-red-700 mt-0.5">
+                      This cannot be undone.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-5 space-y-3">
+                <p className="text-sm text-neutral-700">
+                  This will permanently delete:
+                </p>
+                <ul className="text-xs text-neutral-600 space-y-1 pl-4 list-disc">
+                  <li>Your supplier profile and business details</li>
+                  <li>All products and their images</li>
+                  <li>Your subscription record</li>
+                </ul>
+                <p className="text-xs text-neutral-500">
+                  Existing orders are retained for tax and legal record-keeping.
+                </p>
+                <p className="text-sm text-neutral-700 pt-2">
+                  Type{" "}
+                  <span className="font-mono font-semibold text-red-600">
+                    DELETE
+                  </span>{" "}
+                  to confirm.
+                </p>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder="DELETE"
+                  className="w-full bg-white border border-neutral-200 rounded-xl px-3 py-2.5 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                  autoFocus
+                />
+              </div>
+
+              <div className="p-5 border-t border-neutral-200 flex gap-3">
+                <button
+                  onClick={() => {
+                    setDeleteModalOpen(false);
+                    setDeleteConfirmText("");
+                  }}
+                  className="flex-1 py-2.5 rounded-xl border border-neutral-200 text-sm font-medium text-neutral-700 hover:bg-neutral-100 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    showAlert(
+                      "error",
+                      "Account deletion requires confirmation from support. We've sent your request."
+                    );
+                    setDeleteModalOpen(false);
+                    setDeleteConfirmText("");
+                  }}
+                  disabled={deleteConfirmText !== "DELETE"}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Delete account
                 </button>
               </div>
             </div>
@@ -764,39 +948,5 @@ function Toggle({
         />
       </button>
     </label>
-  );
-}
-
-function SelectRow({
-  icon,
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  icon?: React.ReactNode;
-  label: string;
-  value: string;
-  options: { value: string; label: string }[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-5 py-4">
-      <div className="flex items-center gap-2 text-neutral-500 flex-shrink-0">
-        {icon}
-        <span className="text-sm text-neutral-900 font-medium">{label}</span>
-      </div>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="bg-white border border-neutral-200 rounded-lg px-3 py-1.5 text-sm text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900 focus:border-neutral-900 max-w-[200px]"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </div>
   );
 }

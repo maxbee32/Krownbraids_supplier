@@ -1,3 +1,4 @@
+// app/dashboard/products/ProductFormModal.tsx
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -19,6 +20,7 @@ interface FormState {
   compareAtPrice: string;
   stockQuantity: string;
   lowStockThreshold: string;
+  estimatedDeliveryDays: string;
   status: string;
 }
 
@@ -39,23 +41,36 @@ const EMPTY: FormState = {
   compareAtPrice: "",
   stockQuantity: "0",
   lowStockThreshold: "5",
+  estimatedDeliveryDays: "",
   status: "ACTIVE",
 };
 
-// Where the supplier service serves uploaded files from.
-const SUPPLIER_SERVICE_PUBLIC_URL =
-  process.env.NEXT_PUBLIC_SUPPLIER_SERVICE_URL ||
-  "https://5836-82-36-98-104.ngrok-free.app/supservice";
-
-function toAbsoluteImageUrl(url: string | null): string | null {
+/**
+ * Same image resolution logic as page.tsx.
+ * Every internal image goes through /api/uploads/... so the browser
+ * never touches ngrok directly.
+ */
+function imageSrc(url: string | null): string | null {
   if (!url) return null;
-  if (
-    url.startsWith("http://") ||
-    url.startsWith("https://") ||
-    url.startsWith("blob:")
-  )
-    return url;
-  return `${SUPPLIER_SERVICE_PUBLIC_URL}${url}`;
+  if (url.startsWith("blob:")) return url;
+
+  const suppliersIdx = url.indexOf("/images/suppliers/");
+  if (suppliersIdx !== -1) {
+    return `/api/uploads/${url.substring(suppliersIdx + "/images/suppliers/".length)}`;
+  }
+
+  const uploadsProductsIdx = url.indexOf("/uploads/products/");
+  if (uploadsProductsIdx !== -1) {
+    return `/api/uploads/${url.substring(uploadsProductsIdx + "/uploads/products/".length)}`;
+  }
+
+  if (url.startsWith("/") && !url.startsWith("//")) {
+    return `/api/uploads${url}`;
+  }
+
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+
+  return url;
 }
 
 export function ProductFormModal({ product, onClose, onSaved }: Props) {
@@ -73,6 +88,10 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
               : "",
           stockQuantity: String(product.stockQuantity ?? 0),
           lowStockThreshold: String(product.lowStockThreshold ?? 5),
+          estimatedDeliveryDays:
+            product.estimatedDeliveryDays != null
+              ? String(product.estimatedDeliveryDays)
+              : "",
           status: product.status || "ACTIVE",
         }
       : EMPTY
@@ -82,7 +101,7 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageRemoved, setImageRemoved] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(() =>
-    product?.imageUrl ? toAbsoluteImageUrl(product.imageUrl) : null
+    product?.imageUrl ? imageSrc(product.imageUrl) : null
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -98,9 +117,7 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
   const setField = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
-  // ─────────────────────────────────────────
-  // LOAD CATEGORIES ON MOUNT
-  // ─────────────────────────────────────────
+  // Load categories
   useEffect(() => {
     const load = async () => {
       const token = localStorage.getItem("adminToken");
@@ -125,9 +142,6 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
     load();
   }, []);
 
-  // ─────────────────────────────────────────
-  // IMAGE PICK / REMOVE
-  // ─────────────────────────────────────────
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -157,9 +171,6 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  // ─────────────────────────────────────────
-  // SUBMIT
-  // ─────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -181,7 +192,6 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
 
     setSaving(true);
     try {
-      // 1. Save product fields
       const payload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
@@ -194,6 +204,11 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
             : null,
         stockQuantity: Number(form.stockQuantity) || 0,
         lowStockThreshold: Number(form.lowStockThreshold) || 5,
+        estimatedDeliveryDays:
+          form.estimatedDeliveryDays !== "" &&
+          Number(form.estimatedDeliveryDays) >= 0
+            ? Number(form.estimatedDeliveryDays)
+            : null,
         status: form.status,
       };
 
@@ -224,7 +239,7 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
 
       let saved: Product = data.data;
 
-      // 2a. Remove image if user cleared it
+      // Remove image if user cleared it
       if (imageRemoved && product?.imageUrl) {
         const delRes = await fetch(`/api/auth/products/${saved.id}/image`, {
           method: "DELETE",
@@ -243,7 +258,7 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
         saved = delData.data;
       }
 
-      // 2b. Upload new image
+      // Upload new image
       if (imageFile) {
         const fd = new FormData();
         fd.append("file", imageFile);
@@ -323,6 +338,7 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
                       src={imagePreview}
                       alt="Preview"
                       className="w-full h-full object-cover"
+                      onError={() => setImagePreview(null)}
                     />
                   ) : (
                     <PhotoIcon className="h-8 w-8 text-neutral-300" />
@@ -472,6 +488,29 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
               </Field>
             </div>
 
+            <Field label="Estimated Delivery">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.estimatedDeliveryDays}
+                  onChange={(e) =>
+                    setField("estimatedDeliveryDays", e.target.value)
+                  }
+                  placeholder="e.g. 3"
+                  className="input"
+                />
+                <span className="text-xs text-neutral-500 whitespace-nowrap">
+                  business days
+                </span>
+              </div>
+              <p className="mt-1 text-[10px] text-neutral-500">
+                Leave blank if delivery time varies by order. 0 means same-day
+                dispatch.
+              </p>
+            </Field>
+
             <Field label="Status">
               <select
                 value={form.status}
@@ -495,7 +534,7 @@ export function ProductFormModal({ product, onClose, onSaved }: Props) {
               Cancel
             </button>
             <button
-              type="submit"
+              type="button"
               onClick={handleSubmit}
               disabled={saving}
               className="flex-1 py-2.5 rounded-xl bg-neutral-900 text-white text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-50"

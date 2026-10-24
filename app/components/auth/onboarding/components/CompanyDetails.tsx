@@ -5,14 +5,14 @@ import { Button } from "../../../ui/Button";
 import { Input } from "../../../ui/Input";
 import { OnboardingData } from "../../../../(auth)/onboarding/page";
 import { ArrowLeft, ArrowRight } from "lucide-react";
+import { PostcodeLookup } from "./PostcodeLookup";
 
 interface CompanyDetailsProps {
   data: OnboardingData;
   updateData: (updates: Partial<OnboardingData>) => void;
   onNext: () => void;
   onBack: () => void;
-  isSubmitting?: boolean;               // ← ADD
-
+  isSubmitting?: boolean;
 }
 
 const COMPANY_TYPES = [
@@ -24,7 +24,13 @@ const COMPANY_TYPES = [
   "Retailer",
 ];
 
-export function CompanyDetails({ data, updateData, onNext, onBack }: CompanyDetailsProps) {
+export function CompanyDetails({
+  data,
+  updateData,
+  onNext,
+  onBack,
+  isSubmitting = false,
+}: CompanyDetailsProps) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onNext();
@@ -142,44 +148,16 @@ export function CompanyDetails({ data, updateData, onNext, onBack }: CompanyDeta
             Business Address
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <PostcodeLookup
+              postalCode={data.postalCode}
+              address={data.address}
+              city={data.city}
+              state={data.state}
+              onChange={(patch) => updateData(patch)}
+              disabled={isSubmitting}
+            />
+
             <div className="sm:col-span-2">
-              <Input
-                label="Street Address *"
-                name="address"
-                placeholder="123 Business Street"
-                value={data.address}
-                onChange={(e) => updateData({ address: e.target.value })}
-                required
-              />
-            </div>
-
-            <Input
-              label="City *"
-              name="city"
-              placeholder="London"
-              value={data.city}
-              onChange={(e) => updateData({ city: e.target.value })}
-              required
-            />
-
-            <Input
-              label="State/Region"
-              name="state"
-              placeholder="Greater London"
-              value={data.state}
-              onChange={(e) => updateData({ state: e.target.value })}
-            />
-
-            <Input
-              label="Postal Code *"
-              name="postalCode"
-              placeholder="SW1A 1AA"
-              value={data.postalCode}
-              onChange={(e) => updateData({ postalCode: e.target.value })}
-              required
-            />
-
-            <div>
               <label className="block text-sm font-medium text-neutral-900 mb-2">
                 Country *
               </label>
@@ -213,7 +191,9 @@ export function CompanyDetails({ data, updateData, onNext, onBack }: CompanyDeta
               name="registrationNumber"
               placeholder="12345678"
               value={data.registrationNumber}
-              onChange={(e) => updateData({ registrationNumber: e.target.value })}
+              onChange={(e) =>
+                updateData({ registrationNumber: e.target.value })
+              }
             />
 
             <Input
@@ -233,6 +213,7 @@ export function CompanyDetails({ data, updateData, onNext, onBack }: CompanyDeta
           type="button"
           variant="outline"
           onClick={onBack}
+          disabled={isSubmitting}
           className="w-full sm:w-auto justify-center"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -240,10 +221,12 @@ export function CompanyDetails({ data, updateData, onNext, onBack }: CompanyDeta
         </Button>
         <Button
           type="submit"
+          isLoading={isSubmitting}
+          disabled={isSubmitting}
           className="w-full sm:w-auto sm:min-w-[180px] justify-center"
         >
           Continue
-          <ArrowRight className="w-4 h-4 ml-2" />
+          {!isSubmitting && <ArrowRight className="w-4 h-4 ml-2" />}
         </Button>
       </div>
     </form>

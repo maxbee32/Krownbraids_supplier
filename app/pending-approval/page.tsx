@@ -5,11 +5,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "../components/ui/Logo";
-import { Clock, CheckCircle, Mail, CreditCard } from "lucide-react";
+import { Clock, CheckCircle, Mail, LayoutDashboard, Sparkles } from "lucide-react";
 
 interface BusinessStatus {
   status: string;
   paymentStatus?: string;
+  paymentMethod?: string;
   planName?: string;
   companyName?: string;
   onboardingCompleted?: boolean;
@@ -26,7 +27,7 @@ export default function PendingApprovalPage() {
       try {
         const token = localStorage.getItem("adminToken");
         if (!token) {
-          router.push("/login");
+          router.replace("/login?reason=missing");
           return;
         }
 
@@ -38,18 +39,37 @@ export default function PendingApprovalPage() {
 
         if (!res.ok) {
           setError(data.message || "Failed to load account status");
+          setIsLoading(false);
+          return;
+        }
+
+        // No business row yet → not actually pending, go back to onboarding
+        if (data?.data == null) {
+          router.replace("/onboarding");
           return;
         }
 
         setBusiness(data.data);
 
-        // If approved while user was waiting, redirect
+        // If approved while the user was waiting → send to dashboard
         if (data.data?.status === "APPROVED" || data.data?.status === "ACTIVE") {
-          router.push("/dashboard");
+          router.replace("/dashboard");
+          return;
         }
-      } catch (err) {
+
+        // If rejected or suspended → correct their route
+        if (data.data?.status === "REJECTED" || data.data?.status === "DECLINED") {
+          router.replace("/dashboard/rejected");
+          return;
+        }
+        if (data.data?.status === "SUSPENDED") {
+          router.replace("/dashboard/suspended");
+          return;
+        }
+
+        setIsLoading(false);
+      } catch {
         setError("Failed to load account status");
-      } finally {
         setIsLoading(false);
       }
     };
@@ -62,11 +82,26 @@ export default function PendingApprovalPage() {
   }, [router]);
 
   const handleLogout = () => {
-    localStorage.removeItem("adminToken");
-    localStorage.removeItem("userId");
-    localStorage.removeItem("userRole");
-    router.push("/login");
+    [
+      "adminToken",
+      "adminData",
+      "userId",
+      "userRole",
+      "supplierData",
+      "checkoutId",
+    ].forEach((key) => {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // ignore
+      }
+    });
+    router.replace("/login?reason=signed-out");
   };
+
+  // Trial = free, so no payment was made
+  const isTrial = business?.paymentStatus === "TRIAL";
+  const isPaid = business?.paymentStatus === "SUCCESS";
 
   if (isLoading) {
     return (
@@ -79,9 +114,25 @@ export default function PendingApprovalPage() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-neutral-50 px-4">
+        <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm text-center">
+          <p className="text-sm text-red-700">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50">
-      {/* ─── Fixed top bar — matches landing page, auth, onboarding ─── */}
+      {/* ─── Fixed top bar ─── */}
       <header className="fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-md z-50 border-b border-neutral-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16 md:h-20">
@@ -104,7 +155,7 @@ export default function PendingApprovalPage() {
       {/* ─── Content ─── */}
       <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-8 sm:p-12 text-center">
-          {/* Icon */}
+          {/* Icon — yellow for both trial and paid (still pending) */}
           <div className="w-20 h-20 rounded-full bg-yellow-100 flex items-center justify-center mx-auto mb-6">
             <Clock className="w-10 h-10 text-yellow-600" />
           </div>
@@ -114,8 +165,11 @@ export default function PendingApprovalPage() {
             Account Under Review
           </h1>
           <p className="text-neutral-600 mb-8 max-w-md mx-auto">
-            Thank you for completing your payment! Your account is now being
-            reviewed by our admin team.
+            {isTrial
+              ? "Your free trial is active. Your account is now being reviewed by our admin team."
+              : isPaid
+                ? "Thank you for completing your payment! Your account is now being reviewed by our admin team."
+                : "Your account is now being reviewed by our admin team."}
           </p>
 
           {/* Status card */}
@@ -138,6 +192,17 @@ export default function PendingApprovalPage() {
                     </span>
                   </>
                 )}
+                {isTrial && (
+                  <>
+                    <span className="text-neutral-500">Billing</span>
+                    <span className="text-right">
+                      <span className="inline-flex items-center gap-1 text-xs font-medium bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                        <Sparkles className="w-3 h-3" />
+                        60-day free trial
+                      </span>
+                    </span>
+                  </>
+                )}
                 <span className="text-neutral-500">Status</span>
                 <span className="text-right">
                   <span className="inline-flex items-center gap-1 text-xs font-medium bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">
@@ -156,22 +221,30 @@ export default function PendingApprovalPage() {
             </h3>
 
             <div className="space-y-4">
-              {/* Payment done */}
+              {/* Step 1: either trial activated OR payment received */}
               <div className="flex items-start gap-3">
                 <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
                   <CheckCircle className="w-4 h-4 text-white" />
                 </div>
                 <div>
                   <p className="font-medium text-neutral-900 text-sm">
-                    Payment received
+                    {isTrial
+                      ? "Free trial activated"
+                      : isPaid
+                        ? "Payment received"
+                        : "Account submitted"}
                   </p>
                   <p className="text-xs text-neutral-500">
-                    Your subscription payment has been processed
+                    {isTrial
+                      ? "Your 60-day trial has started — no payment required"
+                      : isPaid
+                        ? "Your subscription payment has been processed"
+                        : "Your application has been submitted"}
                   </p>
                 </div>
               </div>
 
-              {/* Review in progress */}
+              {/* Step 2: review in progress */}
               <div className="flex items-start gap-3">
                 <div className="w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center flex-shrink-0 animate-pulse">
                   <Clock className="w-4 h-4 text-white" />
@@ -181,12 +254,12 @@ export default function PendingApprovalPage() {
                     Admin review in progress
                   </p>
                   <p className="text-xs text-neutral-500">
-                    Our team is verifying your details (24-48 hours)
+                    Our team is verifying your details (24–48 hours)
                   </p>
                 </div>
               </div>
 
-              {/* Email pending */}
+              {/* Step 3: email */}
               <div className="flex items-start gap-3 opacity-50">
                 <div className="w-6 h-6 rounded-full bg-neutral-300 flex items-center justify-center flex-shrink-0">
                   <Mail className="w-4 h-4 text-white" />
@@ -201,10 +274,10 @@ export default function PendingApprovalPage() {
                 </div>
               </div>
 
-              {/* Dashboard pending */}
+              {/* Step 4: dashboard */}
               <div className="flex items-start gap-3 opacity-50">
                 <div className="w-6 h-6 rounded-full bg-neutral-300 flex items-center justify-center flex-shrink-0">
-                  <CreditCard className="w-4 h-4 text-white" />
+                  <LayoutDashboard className="w-4 h-4 text-white" />
                 </div>
                 <div>
                   <p className="font-medium text-neutral-900 text-sm">

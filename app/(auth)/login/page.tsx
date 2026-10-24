@@ -3,7 +3,6 @@ import { AuthCard } from "../../components/auth/AuthCard";
 import { LoginForm } from "../../components/auth/LoginForm";
 import { Suspense } from "react";
 
-
 export const metadata = {
   title: "Sign In | KrownBraids Supplier",
   description: "Sign in to your supplier account",
@@ -12,9 +11,19 @@ export const metadata = {
 export default function LoginPage() {
   return (
     <AuthCard
-      title="Welcome Back"
+      title="Welcome back"
       subtitle="Sign in to your supplier account"
-      image="login"
+      panel={{
+        eyebrow: "Supplier Portal",
+        title: "Pick up where you left off.",
+        body: "Your catalog, orders, and buyer conversations are exactly where you left them.",
+        features: [
+          "Real-time stock across every warehouse",
+          "Wholesale orders and tiered pricing in one view",
+          "Invoices, payments, and credit terms",
+          "Direct conversations with your buyers",
+        ],
+      }}
     >
       <Suspense
         fallback={

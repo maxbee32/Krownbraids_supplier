@@ -1,16 +1,18 @@
-// app/dashboard/page.tsx
+// app/(protected)/dashboard/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  CheckCircleIcon,
   CreditCardIcon,
   ShieldCheckIcon,
   ArrowRightIcon,
   TruckIcon,
   ClipboardDocumentListIcon,
   BanknotesIcon,
+  ClockIcon,
+  SparklesIcon,
+  ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
 import { useAuthToken } from "../../lib/hooks/useAuthToken";
 import { useRevenue } from "../../lib/hooks/useRevenue";
@@ -25,6 +27,7 @@ interface BusinessProfile {
   onboardingStep: string | null;
   onboardingCompleted: boolean;
   paymentStatus: string | null;
+  paymentMethod: string | null;
   paymentCompletedAt: string | null;
   subscriptionStartDate: string | null;
   subscriptionEndDate: string | null;
@@ -34,9 +37,10 @@ interface StoredSupplier {
   id?: string;
   fullName?: string;
   email?: string;
-  token?: string;
   role?: string;
 }
+
+// ─── Helpers ───
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -51,46 +55,21 @@ function formatDate(value: string | null): string {
   }
 }
 
-function statusLabel(status: string): string {
-  switch (status) {
-    case "APPROVED":
-    case "ACTIVE":
-      return "Active";
-    case "PAYMENT_CONFIRMED":
-      return "Awaiting Approval";
-    case "PENDING_APPROVAL":
-      return "Pending Approval";
-    case "IN_PROGRESS":
-      return "Onboarding";
-    case "REVIEW":
-      return "In Review";
-    case "REJECTED":
-    case "DECLINED":
-      return "Rejected";
-    case "SUSPENDED":
-      return "Suspended";
-    default:
-      return status || "Unknown";
-  }
+function daysBetween(from: Date, to: Date): number {
+  return Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function statusBadge(status: string): string {
-  const label = statusLabel(status);
-  if (label === "Active") return "bg-green-100 text-green-800 border-green-200";
-  if (label === "Awaiting Approval")
-    return "bg-blue-100 text-blue-800 border-blue-200";
-  if (label === "Rejected") return "bg-red-100 text-red-800 border-red-200";
-  if (label === "Suspended")
-    return "bg-orange-100 text-orange-800 border-orange-200";
-  return "bg-yellow-100 text-yellow-800 border-yellow-200";
+function isTrialBusiness(b: BusinessProfile | null): boolean {
+  if (!b) return false;
+  return b.paymentMethod === "TRIAL" || b.paymentStatus === "TRIAL";
 }
 
-function paymentAccent(status: string | null): string {
-  if (status === "SUCCESS") return "text-green-600";
-  if (status === "PENDING") return "text-yellow-600";
-  if (status === "FAILED") return "text-red-600";
-  return "text-neutral-900";
+function isPaidBusiness(b: BusinessProfile | null): boolean {
+  if (!b) return false;
+  return b.paymentStatus === "SUCCESS" && b.paymentMethod !== "TRIAL";
 }
+
+// ─── Page ───
 
 export default function SupplierDashboardPage() {
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
@@ -123,7 +102,6 @@ export default function SupplierDashboardPage() {
         });
 
         const text = await res.text();
-
         let data;
         try {
           data = JSON.parse(text);
@@ -151,6 +129,7 @@ export default function SupplierDashboardPage() {
     load();
   }, []);
 
+  // ─── Loading ───
   if (loading) {
     return (
       <div className="p-6 flex items-center justify-center min-h-[60vh]">
@@ -159,6 +138,7 @@ export default function SupplierDashboardPage() {
     );
   }
 
+  // ─── Error ───
   if (error) {
     return (
       <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -169,217 +149,444 @@ export default function SupplierDashboardPage() {
     );
   }
 
+  // ─── Derived state ───
   const status = business?.status || "IN_PROGRESS";
   const firstName = supplier?.fullName?.split(" ")[0] || "there";
+  const isTrial = isTrialBusiness(business);
+  const isPaid = isPaidBusiness(business);
+
+  const trialDaysLeft =
+    isTrial && business?.subscriptionEndDate
+      ? daysBetween(new Date(), new Date(business.subscriptionEndDate))
+      : null;
+
+  const totalRevenue = Number(revenue?.totalRevenue ?? 0);
+  const monthRevenue = Number(revenue?.thisMonthRevenue ?? 0);
+  const hasRevenue = totalRevenue > 0;
+
+  const showGettingStarted = isTrial && !hasRevenue;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
-      {/* Welcome */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-neutral-900 tracking-tight">
-          Welcome back, {firstName}
-        </h1>
-        <p className="text-neutral-600 mt-2">
-          {business?.companyName || "Your business"}
-        </p>
-      </div>
-
-      {/* Stats — revenue first, then the rest */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <RevenueCard
-          total={Number(revenue?.totalRevenue ?? 0)}
-          thisMonth={Number(revenue?.thisMonthRevenue ?? 0)}
-          loading={revenueLoading}
-        />
-        <StatCard
-          label="Plan"
-          value={business?.planName || "—"}
-          sub={business?.billingCycle || ""}
-        />
-        <StatCard
-          label="Status"
-          value={statusLabel(status)}
-          sub={
-            business?.onboardingCompleted ? "Onboarding complete" : "In progress"
-          }
-          badge={statusBadge(status)}
-        />
-        <StatCard
-          label="Payment"
-          value={business?.paymentStatus || "—"}
-          sub={
-            business?.paymentCompletedAt
-              ? formatDate(business.paymentCompletedAt)
-              : ""
-          }
-          accent={paymentAccent(business?.paymentStatus || null)}
-        />
-        <StatCard
-          label="Renews"
-          value={formatDate(business?.subscriptionEndDate || null)}
-          sub={
-            business?.subscriptionStartDate
-              ? `Started ${formatDate(business.subscriptionStartDate)}`
-              : ""
-          }
-        />
-      </div>
-
-      {/* Quick links */}
-      <div>
-        <h2 className="text-xs font-semibold text-neutral-500 mb-4 uppercase tracking-wider">
-          Manage
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <QuickLink
-            href="/dashboard/profile"
-            icon={<ShieldCheckIcon className="h-5 w-5" />}
-            title="Business Profile"
-            desc="View and update your company details"
-          />
-          <QuickLink
-            href="/dashboard/subscription"
-            icon={<CreditCardIcon className="h-5 w-5" />}
-            title="Subscription"
-            desc="Manage your plan and billing"
-          />
-          <QuickLink
-            href="/dashboard/products"
-            icon={<TruckIcon className="h-5 w-5" />}
-            title="Products"
-            desc="Add and manage your inventory"
-          />
-          <QuickLink
-            href="/dashboard/orders"
-            icon={<ClipboardDocumentListIcon className="h-5 w-5" />}
-            title="Orders"
-            desc="Track incoming orders"
-          />
-        </div>
-      </div>
-
-      {/* Account info */}
-      {supplier && (
-        <div className="bg-white border border-neutral-200 rounded-xl p-4 flex items-center gap-3">
-          <CheckCircleIcon className="h-5 w-5 text-cyan-500 flex-shrink-0" />
-          <div className="min-w-0">
-            <p className="text-sm text-neutral-900">
-              Signed in as{" "}
-              <span className="font-medium">{supplier.fullName}</span>
-            </p>
-            <p className="text-xs text-neutral-500 truncate">
-              {supplier.email}
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Revenue headline card ───
-function RevenueCard({
-  total,
-  thisMonth,
-  loading,
-}: {
-  total: number;
-  thisMonth: number;
-  loading: boolean;
-}) {
-  return (
-    <div className="bg-gradient-to-br from-green-500 to-emerald-600 rounded-2xl p-4 sm:p-5 text-white">
-      <div className="flex items-center gap-2 mb-3">
-        <BanknotesIcon className="h-4 w-4 text-white/80" />
-        <p className="text-[10px] uppercase tracking-wider font-medium text-white/80">
-          Revenue
-        </p>
-      </div>
-      {loading ? (
-        <div className="space-y-2">
-          <div className="h-6 w-20 bg-white/20 rounded animate-pulse" />
-          <div className="h-3 w-16 bg-white/10 rounded animate-pulse" />
-        </div>
-      ) : (
-        <>
-          <p className="text-xl sm:text-2xl font-bold leading-tight">
-            £{total.toFixed(2)}
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-12 space-y-10">
+      {/* ──────────────────────── Header ──────────────────────── */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-900">
+            Welcome back, {firstName}
+          </h1>
+          <p className="text-sm text-neutral-600 mt-1.5">
+            {business?.companyName || "Your business"}
+            {business?.companyType && (
+              <span className="text-neutral-400"> · {business.companyType}</span>
+            )}
           </p>
-          <p className="text-[11px] text-white/80 mt-1">
-            £{thisMonth.toFixed(2)} this month
-          </p>
-        </>
-      )}
-    </div>
-  );
-}
+        </div>
+        <StatusPill status={status} />
+      </div>
 
-// ─── Standard stat card ───
-function StatCard({
-  label,
-  value,
-  sub,
-  badge,
-  accent,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  badge?: string;
-  accent?: string;
-}) {
-  return (
-    <div className="bg-white border border-neutral-200 rounded-2xl p-4 sm:p-5">
-      <p className="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">
-        {label}
-      </p>
-      {badge ? (
-        <span
-          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border mt-3 ${badge}`}
-        >
-          {value}
-        </span>
-      ) : (
-        <p
-          className={`text-lg sm:text-xl font-bold mt-2 truncate ${
-            accent || "text-neutral-900"
+      {/* ──────────────────────── Trial banner ──────────────────────── */}
+      {isTrial && trialDaysLeft !== null && trialDaysLeft > 0 && (
+        <div
+          className={`flex items-center gap-4 rounded-2xl border p-5 ${
+            trialDaysLeft <= 7
+              ? "border-amber-300 bg-amber-50"
+              : "border-neutral-200 bg-white"
           }`}
         >
-          {value}
-        </p>
+          <div
+            className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl ${
+              trialDaysLeft <= 7
+                ? "bg-amber-100 text-amber-700"
+                : "bg-neutral-100 text-neutral-700"
+            }`}
+          >
+            {trialDaysLeft <= 7 ? (
+              <ExclamationTriangleIcon className="h-5 w-5" />
+            ) : (
+              <ClockIcon className="h-5 w-5" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p
+              className={`text-sm font-semibold ${
+                trialDaysLeft <= 7 ? "text-amber-900" : "text-neutral-900"
+              }`}
+            >
+              {trialDaysLeft <= 7
+                ? `Trial ends in ${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"}`
+                : `${trialDaysLeft} days left on your free trial`}
+            </p>
+            <p
+              className={`text-sm mt-1 ${
+                trialDaysLeft <= 7 ? "text-amber-700" : "text-neutral-600"
+              }`}
+            >
+              {trialDaysLeft <= 7
+                ? "Choose a plan to keep selling after your trial ends."
+                : `Your trial ends on ${formatDate(business?.subscriptionEndDate ?? null)}.`}
+            </p>
+          </div>
+          <Link
+            href="/dashboard/subscription"
+            className={`flex-shrink-0 rounded-lg px-4 py-2 text-sm font-medium transition ${
+              trialDaysLeft <= 7
+                ? "bg-amber-600 text-white hover:bg-amber-700"
+                : "border border-neutral-200 bg-white text-neutral-900 hover:bg-neutral-50"
+            }`}
+          >
+            {trialDaysLeft <= 7 ? "Choose a plan" : "Upgrade"}
+          </Link>
+        </div>
       )}
-      {sub && (
-        <p className="text-xs text-neutral-500 mt-1.5 truncate">{sub}</p>
+
+      {/* ──────────────────────── Overview cards ──────────────────────── */}
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 mb-4">
+          Overview
+        </h2>
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Revenue */}
+          <div className="flex min-h-[168px] flex-col rounded-2xl border border-neutral-200 bg-white p-6">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                <BanknotesIcon className="h-5 w-5" />
+              </div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                Revenue
+              </p>
+            </div>
+
+            <div className="mt-5 flex-1">
+              {revenueLoading ? (
+                <div className="space-y-2">
+                  <div className="h-8 w-32 bg-neutral-100 rounded animate-pulse" />
+                  <div className="h-4 w-24 bg-neutral-50 rounded animate-pulse" />
+                </div>
+              ) : hasRevenue ? (
+                <>
+                  <p className="text-3xl font-semibold tracking-tight text-neutral-900">
+                    £{totalRevenue.toLocaleString("en-GB", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
+                  <p className="mt-1.5 text-sm text-neutral-500">
+                    £{monthRevenue.toFixed(2)} this month
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-3xl font-semibold tracking-tight text-neutral-300">
+                    £0.00
+                  </p>
+                  <p className="mt-1.5 text-sm text-neutral-500">
+                    No revenue yet
+                  </p>
+                </>
+              )}
+            </div>
+
+            <div className="mt-4 border-t border-neutral-100 pt-3">
+              <p className="text-xs text-neutral-500">
+                {hasRevenue
+                  ? "Updated from your recent orders"
+                  : "Revenue appears after your first order"}
+              </p>
+            </div>
+          </div>
+
+          {/* Plan */}
+          <div className="flex min-h-[168px] flex-col rounded-2xl border border-neutral-200 bg-white p-6">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                <CreditCardIcon className="h-5 w-5" />
+              </div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                Plan
+              </p>
+            </div>
+
+            <div className="mt-5 flex-1">
+              <p className="text-3xl font-semibold tracking-tight text-neutral-900">
+                {business?.planName || "—"}
+              </p>
+              <p className="mt-1.5 text-sm text-neutral-500">
+                {isTrial
+                  ? "Free trial · no billing"
+                  : isPaid
+                    ? `Billed ${business?.billingCycle ?? "monthly"}`
+                    : "Not yet activated"}
+              </p>
+            </div>
+
+            <div className="mt-4 border-t border-neutral-100 pt-3">
+              <Link
+                href="/dashboard/subscription"
+                className="text-xs font-medium text-neutral-700 hover:text-neutral-900"
+              >
+                {isTrial ? "Choose a paid plan →" : "Manage subscription →"}
+              </Link>
+            </div>
+          </div>
+
+          {/* Subscription */}
+          <div className="flex min-h-[168px] flex-col rounded-2xl border border-neutral-200 bg-white p-6">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+                <ShieldCheckIcon className="h-5 w-5" />
+              </div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                {isTrial ? "Trial ends" : "Renews"}
+              </p>
+            </div>
+
+            <div className="mt-5 flex-1">
+              <p className="text-3xl font-semibold tracking-tight text-neutral-900">
+                {isTrial
+                  ? trialDaysLeft !== null
+                    ? `${trialDaysLeft}d`
+                    : "—"
+                  : formatDate(business?.subscriptionEndDate ?? null)}
+              </p>
+              <p className="mt-1.5 text-sm text-neutral-500">
+                {isTrial
+                  ? `Ends ${formatDate(business?.subscriptionEndDate ?? null)}`
+                  : business?.subscriptionStartDate
+                    ? `Started ${formatDate(business.subscriptionStartDate)}`
+                    : "No active subscription"}
+              </p>
+            </div>
+
+            <div className="mt-4 border-t border-neutral-100 pt-3">
+              <p className="text-xs text-neutral-500">
+                {isTrial && trialDaysLeft !== null
+                  ? trialDaysLeft <= 7
+                    ? "Trial ending soon"
+                    : "Trial active"
+                  : "Subscription active"}
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ──────────────────────── Getting started ──────────────────────── */}
+      {showGettingStarted && (
+        <section className="rounded-2xl border border-neutral-200 bg-white p-6 sm:p-8">
+          <div className="flex items-start gap-4 mb-6">
+            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/20">
+              <SparklesIcon className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold tracking-tight text-neutral-900">
+                Get started
+              </h2>
+              <p className="text-sm text-neutral-600 mt-1">
+                Three steps to start selling on KrownBraids.
+              </p>
+            </div>
+          </div>
+
+          <ol className="space-y-3">
+            <GettingStartedStep
+              number={1}
+              title="Add your first product"
+              description="Upload a product with pricing and stock to make it visible to buyers."
+              href="/dashboard/products"
+              actionLabel="Add product"
+            />
+            <GettingStartedStep
+              number={2}
+              title="Complete your business profile"
+              description="Add your logo, description, and contact details so buyers recognize you."
+              href="/dashboard/profile"
+              actionLabel="Edit profile"
+            />
+            <GettingStartedStep
+              number={3}
+              title="Review your subscription"
+              description="See what's included in your trial and when it ends."
+              href="/dashboard/subscription"
+              actionLabel="View plan"
+            />
+          </ol>
+        </section>
       )}
+
+      {/* ──────────────────────── Manage ──────────────────────── */}
+      <section>
+        <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500 mb-4">
+          Manage
+        </h2>
+        <div className="overflow-hidden rounded-2xl border border-neutral-200 bg-white divide-y divide-neutral-100">
+          <ManageRow
+            href="/dashboard/products"
+            icon={<TruckIcon className="h-5 w-5" />}
+            iconBg="bg-emerald-50 text-emerald-600"
+            title="Products"
+            desc="Add and manage your inventory"
+            meta="Inventory"
+          />
+          <ManageRow
+            href="/dashboard/orders"
+            icon={<ClipboardDocumentListIcon className="h-5 w-5" />}
+            iconBg="bg-blue-50 text-blue-600"
+            title="Orders"
+            desc="Track incoming orders and shipments"
+            meta="Sales"
+          />
+          <ManageRow
+            href="/dashboard/profile"
+            icon={<ShieldCheckIcon className="h-5 w-5" />}
+            iconBg="bg-violet-50 text-violet-600"
+            title="Business profile"
+            desc="View and update your company details"
+            meta="Account"
+          />
+          <ManageRow
+            href="/dashboard/subscription"
+            icon={<CreditCardIcon className="h-5 w-5" />}
+            iconBg="bg-amber-50 text-amber-600"
+            title="Subscription"
+            desc="Manage your plan and billing"
+            meta="Billing"
+          />
+        </div>
+      </section>
     </div>
   );
 }
 
-// ─── Quick link card ───
-function QuickLink({
+// ─── Status pill ───
+
+function StatusPill({ status }: { status: string }) {
+  const map: Record<string, { label: string; className: string }> = {
+    APPROVED: {
+      label: "Active",
+      className: "bg-emerald-50 text-emerald-800 ring-emerald-500/20",
+    },
+    ACTIVE: {
+      label: "Active",
+      className: "bg-emerald-50 text-emerald-800 ring-emerald-500/20",
+    },
+    PAYMENT_CONFIRMED: {
+      label: "Awaiting approval",
+      className: "bg-blue-50 text-blue-800 ring-blue-500/20",
+    },
+    PENDING_APPROVAL: {
+      label: "Pending approval",
+      className: "bg-blue-50 text-blue-800 ring-blue-500/20",
+    },
+    REVIEW: {
+      label: "In review",
+      className: "bg-blue-50 text-blue-800 ring-blue-500/20",
+    },
+    IN_PROGRESS: {
+      label: "Onboarding",
+      className: "bg-yellow-50 text-yellow-800 ring-yellow-500/20",
+    },
+    REJECTED: {
+      label: "Rejected",
+      className: "bg-red-50 text-red-800 ring-red-500/20",
+    },
+    DECLINED: {
+      label: "Rejected",
+      className: "bg-red-50 text-red-800 ring-red-500/20",
+    },
+    SUSPENDED: {
+      label: "Suspended",
+      className: "bg-orange-50 text-orange-800 ring-orange-500/20",
+    },
+  };
+
+  const config = map[status] ?? {
+    label: status || "Unknown",
+    className: "bg-neutral-100 text-neutral-700 ring-neutral-500/20",
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-medium ring-1 ring-inset ${config.className}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      {config.label}
+    </span>
+  );
+}
+
+// ─── Getting started step ───
+
+function GettingStartedStep({
+  number,
+  title,
+  description,
+  href,
+  actionLabel,
+}: {
+  number: number;
+  title: string;
+  description: string;
+  href: string;
+  actionLabel: string;
+}) {
+  return (
+    <li className="flex items-center gap-4 rounded-xl border border-neutral-200 bg-white p-5 transition hover:border-neutral-300">
+      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-neutral-900 text-xs font-semibold text-white">
+        {number}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-neutral-900">{title}</p>
+        <p className="mt-1 text-xs leading-relaxed text-neutral-600">
+          {description}
+        </p>
+      </div>
+      <Link
+        href={href}
+        className="flex-shrink-0 rounded-lg border border-neutral-200 bg-white px-4 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-300 hover:bg-neutral-50"
+      >
+        {actionLabel}
+      </Link>
+    </li>
+  );
+}
+
+// ─── Manage row ───
+
+function ManageRow({
   href,
   icon,
+  iconBg,
   title,
   desc,
+  meta,
 }: {
   href: string;
   icon: React.ReactNode;
+  iconBg: string;
   title: string;
   desc: string;
+  meta?: string;
 }) {
   return (
     <Link
       href={href}
-      className="bg-white border border-neutral-200 rounded-2xl p-5 hover:border-neutral-300 hover:shadow-sm transition-all group flex items-center gap-4"
+      className="group flex items-center gap-4 px-6 py-4 transition hover:bg-neutral-50"
     >
-      <div className="h-10 w-10 rounded-xl bg-neutral-100 flex items-center justify-center text-neutral-700 flex-shrink-0 group-hover:bg-neutral-900 group-hover:text-white transition-colors">
+      <div
+        className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${iconBg}`}
+      >
         {icon}
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-neutral-900">{title}</p>
-        <p className="text-xs text-neutral-500 truncate mt-0.5">{desc}</p>
+        <p className="mt-0.5 truncate text-sm text-neutral-500">{desc}</p>
       </div>
-      <ArrowRightIcon className="h-4 w-4 text-neutral-300 group-hover:text-neutral-500 transition-colors flex-shrink-0" />
+      {meta && (
+        <span className="hidden flex-shrink-0 rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-neutral-500 sm:inline">
+          {meta}
+        </span>
+      )}
+      <ArrowRightIcon className="h-4 w-4 flex-shrink-0 text-neutral-300 transition-colors group-hover:text-neutral-500" />
     </Link>
   );
 }

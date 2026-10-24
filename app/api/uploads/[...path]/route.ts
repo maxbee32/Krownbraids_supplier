@@ -1,50 +1,48 @@
 // app/api/uploads/[...path]/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-// Direct tunnel to the supplier service (bypasses the gateway, serves /uploads/**)
-const SUPPLIER_SERVICE_ROOT = "https://5783-82-36-98-104.ngrok-free.app";
+const BACKEND_URL =
+  process.env.SUPPLIER_SERVICE_URL ||
+  "https://899a-82-36-98-104.ngrok-free.app/supservice";
 
 export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ path: string[] }> }
+  request: NextRequest,
+  context: { params: Promise<{ path: string[] }> }
 ) {
-  const { path } = await params;
-  const filePath = path.join("/");
-  const targetUrl = `${SUPPLIER_SERVICE_ROOT}/uploads/${filePath}`;
-
-  console.log("[img] target URL:", targetUrl);
-
   try {
-    const upstream = await fetch(targetUrl, {
+    const { path } = await context.params;
+    const filePath = path.join("/");
+
+    const url = `${BACKEND_URL}/api/v1/auth/images/suppliers/${filePath}`;
+    console.log("[img] proxying:", url);
+
+    const backendResponse = await fetch(url, {
       headers: {
         "ngrok-skip-browser-warning": "true",
-        Accept: "image/*,*/*",
+        "User-Agent": "krownbraids-server/1.0",
       },
-      redirect: "follow",
+      cache: "no-store",
     });
 
-    console.log("[img] upstream status:", upstream.status);
-    console.log("[img] upstream content-type:", upstream.headers.get("content-type"));
+    console.log("[img] status:", backendResponse.status);
 
-    if (!upstream.ok) {
-      const body = await upstream.text().catch(() => "");
-      console.log("[img] error body:", body.slice(0, 400));
-      return new NextResponse(null, { status: upstream.status });
+    if (!backendResponse.ok) {
+      return new NextResponse(null, { status: backendResponse.status });
     }
 
-    const buffer = await upstream.arrayBuffer();
     const contentType =
-      upstream.headers.get("content-type") || "application/octet-stream";
+      backendResponse.headers.get("content-type") || "image/jpeg";
+    const buffer = await backendResponse.arrayBuffer();
 
     return new NextResponse(buffer, {
       status: 200,
       headers: {
         "Content-Type": contentType,
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "Cache-Control": "public, max-age=3600, immutable",
       },
     });
-  } catch (err) {
-    console.error("[img] fetch error:", err);
-    return new NextResponse(null, { status: 502 });
+  } catch (error) {
+    console.error("[img] proxy error:", error);
+    return new NextResponse(null, { status: 500 });
   }
 }
