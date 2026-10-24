@@ -13,9 +13,24 @@ export default function VerifyOTPPage() {
     <AuthCard
       title="Verify your email"
       subtitle="We've sent a 4-digit code to your email"
-      image="signup"
+      panel={{
+        eyebrow: "Almost there",
+        title: "One step left.",
+        body: "Verify your email to activate your supplier account and start listing products.",
+        features: [
+          "Secure email verification",
+          "Resend the code if it expires",
+          "Instant account activation",
+        ],
+      }}
     >
-      <Suspense fallback={<div className="text-center text-neutral-500">Loading...</div>}>
+      <Suspense
+        fallback={
+          <div className="flex items-center justify-center py-8">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-neutral-200 border-t-neutral-900" />
+          </div>
+        }
+      >
         <OTPForm />
       </Suspense>
     </AuthCard>
