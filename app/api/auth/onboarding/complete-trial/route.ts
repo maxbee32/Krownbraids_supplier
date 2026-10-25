@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND_URL =
   process.env.BACKEND_URL ||
-  "https://899a-82-36-98-104.ngrok-free.app/supservice/api/v1/auth";
+  "https://7257-82-36-98-104.ngrok-free.app/supservice/api/v1/auth";
 
 export async function PUT(request: NextRequest) {
   const auth = request.headers.get("authorization");

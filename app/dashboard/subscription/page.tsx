@@ -8,7 +8,6 @@ import {
   CalendarDays,
   Sparkles,
   AlertTriangle,
-  Download,
   HelpCircle,
   TrendingUp,
   TrendingDown,
@@ -62,11 +61,6 @@ function formatDate(value: string | null): string {
   } catch {
     return value;
   }
-}
-
-function money(v: number, currency = "GBP"): string {
-  const sym = currency === "GBP" ? "£" : currency === "USD" ? "$" : "€";
-  return `${sym}${v.toFixed(2)}`;
 }
 
 function daysRemaining(endDate: string | null): number | null {
@@ -147,6 +141,28 @@ function planRank(plan: Plan | null): number {
   return 4;
 }
 
+/**
+ * Trial eligibility — must match backend `assertTrialEligible`.
+ * Any supplier who has EVER had a subscription (trial or paid, active or
+ * expired) or has EVER paid is permanently ineligible for TRIAL.
+ */
+function canSelectTrial(business: BusinessProfile | null): boolean {
+  if (!business) return false;
+  if (business.subscriptionStartDate) return false;
+  if (business.paymentStatus === "SUCCESS") return false;
+  if (
+    business.status === "APPROVED" ||
+    business.status === "ACTIVE"
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isTrialPlan(plan: Plan): boolean {
+  return plan.code === "TRIAL" || Number(plan.monthlyPrice) === 0;
+}
+
 // ─── Page ───
 
 export default function SubscriptionPage() {
@@ -193,8 +209,7 @@ export default function SubscriptionPage() {
           if (cycle === "yearly" || cycle === "monthly") setBillingCycle(cycle);
         }
 
-        // The proxy returns a bare array (backend returns array directly).
-        // Handle both shapes: raw array, or { success, data } wrapper.
+        // Proxy returns a bare array; handle both shapes
         let planList: Plan[] = [];
         if (Array.isArray(plansRaw)) {
           planList = plansRaw;
@@ -232,10 +247,21 @@ export default function SubscriptionPage() {
   );
   const currentRank = planRank(currentPlan);
   const hasPlan = !!business?.planName;
+  const trialAllowed = canSelectTrial(business);
 
   const handleSelectPlan = async (plan: Plan) => {
     if (!business) return;
     if (plan.name === business.planName) return;
+
+    // Trial is never a paid upgrade/downgrade — it goes through the
+    // supplier service's /complete-trial endpoint, not this page.
+    if (isTrialPlan(plan)) {
+      setActionError(
+        "The Trial plan cannot be selected here. " +
+          "If you're signing up, complete onboarding first."
+      );
+      return;
+    }
 
     const targetRank = planRank(plan);
 
@@ -269,13 +295,6 @@ export default function SubscriptionPage() {
       if (!supplierId) {
         setActionError(
           "Could not determine your supplier ID. Please sign in again."
-        );
-        return;
-      }
-
-      if (Number(plan.monthlyPrice) === 0) {
-        setActionError(
-          "The Trial plan is only available at signup. Please choose a paid plan."
         );
         return;
       }
@@ -540,7 +559,10 @@ export default function SubscriptionPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {plans.map((plan) => {
-              const isCurrent = plan.name === business.planName;
+              const isCurrent = plan.name === business.planName &&
+              !isExpired &&  days !== null && days > 0;
+              const trialPlan = isTrialPlan(plan);
+              const trialBlocked = trialPlan && !trialAllowed;
               const isFree = Number(plan.monthlyPrice) === 0;
               const price =
                 billingCycle === "monthly"
@@ -549,19 +571,22 @@ export default function SubscriptionPage() {
               const features = planFeatures(plan);
 
               const targetRank = planRank(plan);
-              const isUpgrade = currentPlan && targetRank > currentRank;
-              const isDowngrade = currentPlan && targetRank < currentRank;
+              const isUpgrade =
+                !trialBlocked && currentPlan && targetRank > currentRank;
+              const isDowngrade =
+                !trialBlocked && currentPlan && targetRank < currentRank;
               const isSwitching = switching === plan.id;
 
               let buttonLabel = "Switch to this plan";
               if (isCurrent) buttonLabel = "Current plan";
-              else if (!hasPlan)
-                buttonLabel = isFree ? "Start free trial" : "Select plan";
+              else if (trialBlocked) buttonLabel = "Trial used";
+              else if (trialPlan && !hasPlan)
+                buttonLabel = "Trial (signup only)";
               else if (isUpgrade) buttonLabel = "Upgrade";
               else if (isDowngrade) buttonLabel = "Downgrade";
 
               const disableButton =
-                isCurrent || isSwitching || (!hasPlan && isFree);
+                isCurrent || isSwitching || trialBlocked || trialPlan;
 
               return (
                 <div
@@ -569,10 +594,14 @@ export default function SubscriptionPage() {
                   className={`relative rounded-2xl p-5 border-2 transition-all flex flex-col ${
                     isCurrent
                       ? "border-neutral-900 bg-neutral-50"
+                      : trialBlocked
+                      ? "border-neutral-200 bg-neutral-50/60 opacity-70"
+                      : trialPlan
+                      ? "border-neutral-200 bg-neutral-50/40 opacity-80"
                       : "border-neutral-200 bg-white hover:border-neutral-300"
                   }`}
                 >
-                  {plan.popular && !isCurrent && (
+                  {plan.popular && !isCurrent && !trialBlocked && (
                     <div className="absolute -top-2.5 left-5">
                       <span className="bg-neutral-900 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
                         Popular
@@ -584,6 +613,14 @@ export default function SubscriptionPage() {
                     <div className="absolute -top-2.5 left-5">
                       <span className="bg-green-600 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
                         Current
+                      </span>
+                    </div>
+                  )}
+
+                  {trialBlocked && (
+                    <div className="absolute -top-2.5 left-5">
+                      <span className="bg-neutral-500 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                        Unavailable
                       </span>
                     </div>
                   )}
@@ -636,7 +673,7 @@ export default function SubscriptionPage() {
                     className={`w-full py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
                       isCurrent
                         ? "bg-neutral-100 text-neutral-500 cursor-not-allowed"
-                        : !hasPlan && isFree
+                        : trialBlocked || trialPlan
                         ? "bg-neutral-100 text-neutral-400 cursor-not-allowed"
                         : isUpgrade
                         ? "bg-neutral-900 text-white hover:bg-neutral-800"
@@ -659,8 +696,16 @@ export default function SubscriptionPage() {
                     )}
                   </button>
 
-                  {!hasPlan && isFree && (
-                    <p className="text-[10px] text-neutral-400 text-center mt-2">
+                  {trialBlocked && (
+                    <p className="mt-2 text-[10px] text-neutral-500 text-center leading-relaxed">
+                      {business.paymentStatus === "SUCCESS"
+                        ? "Free trial is for new accounts only"
+                        : "Your free trial has already been used"}
+                    </p>
+                  )}
+
+                  {trialPlan && !trialBlocked && !hasPlan && (
+                    <p className="mt-2 text-[10px] text-neutral-500 text-center leading-relaxed">
                       Free trial is only available at signup
                     </p>
                   )}
@@ -671,7 +716,6 @@ export default function SubscriptionPage() {
         </section>
       )}
 
-      {/* No plans fallback */}
       {plans.length === 0 && !loading && (
         <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-8 text-center">
           <p className="text-sm text-neutral-600">
@@ -699,8 +743,8 @@ export default function SubscriptionPage() {
               Downgrade to {confirmDowngrade.name}?
             </h3>
             <p className="mt-2 text-sm text-neutral-600 leading-relaxed">
-              Downgrading is a billing change we handle manually so you don&apos;t
-              lose access before your current period ends.
+              Downgrading is a billing change we handle manually so you
+              don&apos;t lose access before your current period ends.
             </p>
             <p className="mt-3 text-sm text-neutral-600 leading-relaxed">
               Contact support and we&apos;ll schedule the change for{" "}
@@ -729,7 +773,6 @@ export default function SubscriptionPage() {
         </div>
       )}
 
-      {/* Contact */}
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 flex items-start gap-3">
         <HelpCircle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
         <div>

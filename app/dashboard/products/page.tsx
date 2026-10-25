@@ -36,6 +36,13 @@ export interface Product {
   categoryCommissionRate: number | null;
 }
 
+interface PlanUsage {
+  name: string | null;
+  maxProducts: number | null; // null or 0 = unlimited
+  usedProducts: number;
+  canAddMore: boolean;
+}
+
 function imageSrc(url: string | null): string | null {
   if (!url) return null;
   if (url.startsWith("blob:")) return url;
@@ -117,6 +124,7 @@ function computeProductNet(product: Product): {
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [planUsage, setPlanUsage] = useState<PlanUsage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -157,6 +165,7 @@ export default function ProductsPage() {
         throw new Error(data.message || "Failed to load products");
       }
       setProducts(data.data || []);
+      setPlanUsage(data.plan ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
@@ -182,6 +191,19 @@ export default function ProductsPage() {
       const data = await res.json();
       if (res.ok && data.success) {
         setProducts((prev) => prev.filter((p) => p.id !== id));
+
+        if (planUsage) {
+          const used = Math.max(0, planUsage.usedProducts - 1);
+          setPlanUsage({
+            ...planUsage,
+            usedProducts: used,
+            canAddMore:
+              planUsage.maxProducts == null ||
+              planUsage.maxProducts === 0 ||
+              used < planUsage.maxProducts,
+          });
+        }
+
         showAlert("success", "Product deleted");
       } else {
         showAlert("error", data.message || "Failed to delete");
@@ -195,6 +217,7 @@ export default function ProductsPage() {
   };
 
   const openCreate = () => {
+    if (!canCreate) return;
     setEditing(null);
     setModalOpen(true);
   };
@@ -209,6 +232,19 @@ export default function ProductsPage() {
     setProducts((prev) =>
       isNew ? [saved, ...prev] : prev.map((p) => (p.id === saved.id ? saved : p))
     );
+
+    if (isNew && planUsage) {
+      const used = planUsage.usedProducts + 1;
+      setPlanUsage({
+        ...planUsage,
+        usedProducts: used,
+        canAddMore:
+          planUsage.maxProducts == null ||
+          planUsage.maxProducts === 0 ||
+          used < planUsage.maxProducts,
+      });
+    }
+
     setModalOpen(false);
     setEditing(null);
     showAlert("success", isNew ? "Product created" : "Product updated");
@@ -223,6 +259,12 @@ export default function ProductsPage() {
       (p.category || "").toLowerCase().includes(q)
     );
   });
+
+  const canCreate = planUsage?.canAddMore ?? true;
+  const showUsageBanner =
+    planUsage != null &&
+    planUsage.maxProducts != null &&
+    planUsage.maxProducts > 0;
 
   if (loading) {
     return (
@@ -246,7 +288,9 @@ export default function ProductsPage() {
         </div>
         <button
           onClick={openCreate}
-          className="inline-flex items-center justify-center gap-2 bg-neutral-900 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors"
+          disabled={!canCreate}
+          title={!canCreate ? "You've reached your plan's product limit" : undefined}
+          className="inline-flex items-center justify-center gap-2 bg-neutral-900 text-white px-4 py-2.5 rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <PlusIcon className="h-4 w-4" />
           Add Product
@@ -276,6 +320,35 @@ export default function ProductsPage() {
           >
             <XMarkIcon className="h-4 w-4" />
           </button>
+        </div>
+      )}
+
+      {/* Plan usage banner */}
+      {showUsageBanner && (
+        <div
+          className={`rounded-xl border p-3 flex items-start gap-3 text-sm ${
+            planUsage!.canAddMore
+              ? "bg-neutral-50 border-neutral-200 text-neutral-700"
+              : "bg-amber-50 border-amber-200 text-amber-800"
+          }`}
+        >
+          <ExclamationTriangleIcon className="h-4 w-4 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="font-medium">
+              {planUsage!.usedProducts} / {planUsage!.maxProducts} products used
+              {planUsage!.name && (
+                <span className="text-xs font-normal opacity-70 ml-2">
+                  ({planUsage!.name} plan)
+                </span>
+              )}
+            </p>
+            {!planUsage!.canAddMore && (
+              <p className="text-xs mt-0.5">
+                You&apos;ve reached your plan limit. Upgrade your plan to add more
+                products.
+              </p>
+            )}
+          </div>
         </div>
       )}
 
@@ -315,7 +388,9 @@ export default function ProductsPage() {
           {products.length === 0 && (
             <button
               onClick={openCreate}
-              className="mt-4 inline-flex items-center gap-2 bg-neutral-900 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors"
+              disabled={!canCreate}
+              title={!canCreate ? "You've reached your plan's product limit" : undefined}
+              className="mt-4 inline-flex items-center gap-2 bg-neutral-900 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-neutral-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <PlusIcon className="h-4 w-4" />
               Add Product
