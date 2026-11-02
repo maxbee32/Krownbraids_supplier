@@ -664,26 +664,7 @@ export default function ProfilePage() {
         </Link>
       </Section>
 
-      {/* Danger zone */}
-      <Section title="Danger zone" icon={<AlertTriangle className="h-4 w-4 text-red-500" />}>
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-neutral-900">
-              Deactivate your account
-            </p>
-            <p className="text-xs text-neutral-500 mt-0.5">
-              Your products will be hidden from the marketplace. Your data is kept
-              for 30 days in case you change your mind.
-            </p>
-          </div>
-          <Link
-            href="/contact?subject=deactivate-account"
-            className="inline-flex items-center justify-center rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 flex-shrink-0"
-          >
-            Contact support
-          </Link>
-        </div>
-      </Section>
+      
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 const PAYMENT_SERVICE_URL =
   process.env.PAYMENT_SERVICE_URL ||
-  "https://7257-82-36-98-104.ngrok-free.app/pservice";
+  "https://4ef0-82-36-98-104.ngrok-free.app /pservice";
 
 export async function GET(
   request: Request,
@@ -20,10 +20,8 @@ export async function GET(
       );
     }
 
-    console.log("Verifying supplier payment:", params.checkoutId);
-
-    const backendUrl = `${PAYMENT_SERVICE_URL}/api/v1/auth/supplier-payment/verify/${params.checkoutId}`;
-    console.log("Calling backend:", backendUrl);
+    // Point to the new Stripe-aware endpoint
+    const backendUrl = `${PAYMENT_SERVICE_URL}/api/v1/auth/stripe/verify/${params.checkoutId}`;
 
     const response = await fetch(backendUrl, {
       method: "GET",
@@ -35,9 +33,6 @@ export async function GET(
     });
 
     const rawResponse = await response.text();
-    console.log("Backend status:", response.status);
-    console.log("Raw response:", rawResponse);
-
     let data;
     try {
       data = JSON.parse(rawResponse);

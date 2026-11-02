@@ -17,27 +17,105 @@ import {
   ShieldCheck,
   AlertCircle,
   CheckCircle,
+  X,
+  Loader2,
 } from "lucide-react";
+import { loadStripe } from "@stripe/stripe-js";
+import {
+  EmbeddedCheckoutProvider,
+  EmbeddedCheckout,
+} from "@stripe/react-stripe-js";
+
+const stripePromise = loadStripe(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
+);
 
 interface ReviewSubmitProps {
   data: OnboardingData;
-  onSubmit: () => void;
+  onTrialActivate: () => void;
+  onPaymentComplete: () => void;
   onBack: () => void;
   isSubmitting: boolean;
 }
 
 export function ReviewSubmit({
   data,
-  onSubmit,
+  onTrialActivate,
+  onPaymentComplete,
   onBack,
   isSubmitting,
 }: ReviewSubmitProps) {
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [agreedToAccuracy, setAgreedToAccuracy] = useState(false);
 
-  // Trial = free plan — no card payment needed
+  // Stripe embedded checkout state
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [payError, setPayError] = useState<string | null>(null);
+
   const isTrial = Number(data.planPrice) === 0;
-  const canSubmit = agreedToTerms && agreedToAccuracy && !isSubmitting;
+  const canSubmit =
+    agreedToTerms && agreedToAccuracy && !isSubmitting && !preparing;
+
+  const handleStartPayment = async () => {
+    setPayError(null);
+    setPreparing(true);
+
+    try {
+      const token = localStorage.getItem("adminToken");
+      if (!token) throw new Error("Not authenticated");
+
+      if (!data.supplierId) {
+        throw new Error("Supplier ID missing. Please log in again.");
+      }
+      if (!data.planId) {
+        throw new Error("No plan selected.");
+      }
+
+      const res = await fetch(
+        "/api/auth/supplier-payment/create-stripe-session",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            supplierId: data.supplierId,
+            planId: data.planId,
+            billingCycle: data.billingCycle,
+            email: data.companyEmail,
+          }),
+        }
+      );
+
+      const payload = await res.json().catch(() => ({}));
+
+      if (!res.ok || !payload.clientSecret) {
+        throw new Error(payload.message || "Failed to initialize payment");
+      }
+
+      setClientSecret(payload.clientSecret);
+      setCheckoutOpen(true);
+    } catch (err) {
+      setPayError(
+        err instanceof Error ? err.message : "Failed to initialize payment"
+      );
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (!canSubmit) return;
+
+    if (isTrial) {
+      onTrialActivate();
+    } else {
+      handleStartPayment();
+    }
+  };
 
   return (
     <div className="p-6 sm:p-8 lg:p-10">
@@ -81,7 +159,7 @@ export function ReviewSubmit({
             <div className="flex items-center justify-between pt-2 border-t border-neutral-200">
               <span className="text-sm text-neutral-600">Total</span>
               <span className="text-lg font-bold text-neutral-900">
-                {isTrial ? "Free" : `£${data.planPrice}`}
+                {isTrial ? "Free" : `£${Number(data.planPrice).toFixed(2)}`}
               </span>
             </div>
             {isTrial && (
@@ -183,16 +261,23 @@ export function ReviewSubmit({
               </div>
               <div>
                 <h4 className="mb-1 font-medium text-blue-900">
-                  Card payment via SumUp
+                  Secure card payment via Stripe
                 </h4>
                 <p className="text-sm text-blue-700">
-                  After clicking <strong>Proceed to payment</strong>, you&apos;ll
-                  be redirected to SumUp&apos;s secure hosted checkout to enter
-                  your card details. You&apos;ll return here once payment is
-                  complete, and your application will be submitted for approval.
+                  Click <strong>Pay with card</strong> to enter your details
+                  directly on this page. No redirect — payment happens inline.
+                  Your subscription activates immediately after successful
+                  payment.
                 </p>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Pay error */}
+        {payError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {payError}
           </div>
         )}
 
@@ -273,11 +358,11 @@ export function ReviewSubmit({
             </ol>
           ) : (
             <ol className="text-amber-800 list-decimal list-inside space-y-0.5">
-              <li>You&apos;ll be taken to SumUp to pay by card.</li>
-              <li>Once paid, your application is submitted for approval.</li>
+              <li>Click <strong>Pay with card</strong> to open the payment form.</li>
+              <li>Enter your card details and confirm payment.</li>
               <li>
-                Our team reviews it within 24–48 hours — you&apos;ll be notified
-                by email.
+                Your application is submitted for approval — our team reviews
+                it within 24–48 hours.
               </li>
             </ol>
           )}
@@ -290,7 +375,7 @@ export function ReviewSubmit({
           type="button"
           variant="outline"
           onClick={onBack}
-          disabled={isSubmitting}
+          disabled={isSubmitting || preparing}
           className="w-full sm:w-auto justify-center"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -298,26 +383,79 @@ export function ReviewSubmit({
         </Button>
         <Button
           type="button"
-          onClick={onSubmit}
+          onClick={handleSubmit}
           disabled={!canSubmit}
-          isLoading={isSubmitting}
+          isLoading={isSubmitting || preparing}
           className="w-full sm:w-auto sm:min-w-[220px] justify-center"
         >
-          {isSubmitting
-            ? isTrial
-              ? "Submitting…"
-              : "Redirecting…"
-            : isTrial
-              ? "Submit for approval"
-              : "Proceed to card payment"}
-          {!isSubmitting &&
-            (isTrial ? (
+          {preparing ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Preparing…
+            </>
+          ) : isTrial ? (
+            <>
+              Submit for approval
               <CheckCircle className="w-4 h-4 ml-2" />
-            ) : (
-              <ArrowRight className="w-4 h-4 ml-2" />
-            ))}
+            </>
+          ) : (
+            <>
+              Pay with card
+              <CreditCard className="w-4 h-4 ml-2" />
+            </>
+          )}
         </Button>
       </div>
+
+      {/* Stripe embedded checkout modal */}
+      {checkoutOpen && clientSecret && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={() => {
+            setCheckoutOpen(false);
+            setClientSecret(null);
+          }}
+        >
+          <div
+            className="relative w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl"
+            style={{ maxHeight: "90vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 flex items-center justify-between rounded-t-2xl border-b border-neutral-200 bg-white px-5 py-3">
+              <h3 className="font-semibold text-neutral-900">
+                Complete payment
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setCheckoutOpen(false);
+                  setClientSecret(null);
+                }}
+                className="rounded p-1 text-neutral-500 hover:text-neutral-900"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-2">
+              <EmbeddedCheckoutProvider
+                stripe={stripePromise}
+                options={{
+                  clientSecret,
+                  onComplete: () => {
+                    setCheckoutOpen(false);
+                    setClientSecret(null);
+                    onPaymentComplete();
+                  },
+                }}
+              >
+                <EmbeddedCheckout />
+              </EmbeddedCheckoutProvider>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

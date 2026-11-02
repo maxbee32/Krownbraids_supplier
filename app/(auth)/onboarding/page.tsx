@@ -1,3 +1,4 @@
+// app/(auth)/onboarding/page.tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -17,6 +18,8 @@ import { PlanSelection } from "../../components/auth/onboarding/components/PlanS
 import { ReviewSubmit } from "../../components/auth/onboarding/components/ReviewSubmit";
 
 export interface OnboardingData {
+  supplierId: string | null;
+
   planId: number | null;
   planName: string;
   planPrice: number;
@@ -35,15 +38,11 @@ export interface OnboardingData {
   registrationNumber: string;
   taxId: string;
   description: string;
-
-  paymentMethod: "card"  | null;
-  cardNumber: string;
-  cardName: string;
-  cardExpiry: string;
-  cardCvc: string;
 }
 
 const INITIAL_DATA: OnboardingData = {
+  supplierId: null,
+
   planId: null,
   planName: "",
   planPrice: 0,
@@ -62,12 +61,6 @@ const INITIAL_DATA: OnboardingData = {
   registrationNumber: "",
   taxId: "",
   description: "",
-
-  paymentMethod: null,
-  cardNumber: "",
-  cardName: "",
-  cardExpiry: "",
-  cardCvc: "",
 };
 
 type StepId = 1 | 2 | 3;
@@ -78,8 +71,6 @@ const STEPS: { id: StepId; name: string; shortName: string; blurb: string }[] = 
   { id: 3, name: "Review & Submit", shortName: "Review", blurb: "Confirm & finish" },
 ];
 
-// Backend has 4 states: BUSINESS → PLAN → PAYMENT → REVIEW → COMPLETED
-// Frontend collapses PAYMENT/REVIEW/COMPLETED into step 3.
 function stepToUiStep(backendStep: string | null | undefined): StepId {
   switch (backendStep) {
     case "BUSINESS":
@@ -110,6 +101,43 @@ export default function OnboardingPage() {
   const [error, setError] = useState<string | null>(null);
 
   // ─────────────────────────────────────────────
+  // Resolve supplierId from any available source
+  // ─────────────────────────────────────────────
+  const resolveSupplierId = useCallback(
+    async (token: string): Promise<string | null> => {
+      try {
+        const stored = localStorage.getItem("supplierData");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const id = parsed.id ?? parsed.supplierId ?? null;
+          if (id) return id;
+        }
+      } catch {
+        // ignore
+      }
+
+      const cached = localStorage.getItem("userId");
+      if (cached) return cached;
+
+      try {
+        const meRes = await fetch("/api/auth/supplier/me", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const meData = await meRes.json().catch(() => ({}));
+        if (meData.success && meData.data?.id) {
+          localStorage.setItem("userId", meData.data.id);
+          return meData.data.id;
+        }
+      } catch {
+        // ignore
+      }
+
+      return null;
+    },
+    []
+  );
+
+  // ─────────────────────────────────────────────
   // Bootstrap: auth + resume from saved step
   // ─────────────────────────────────────────────
   const bootstrapOnboarding = useCallback(async () => {
@@ -132,9 +160,11 @@ export default function OnboardingPage() {
       }
 
       const result = await res.json();
+      const supplierId = await resolveSupplierId(token);
 
-      // `{ data: null }` → fresh account, no business row yet
+      // Fresh account, no business row yet
       if (result?.data == null) {
+        setData((prev) => ({ ...prev, supplierId }));
         setBootstrap({ kind: "ready" });
         setCurrentStep(1);
         return;
@@ -162,9 +192,10 @@ export default function OnboardingPage() {
         return;
       }
 
-      // Resume: hydrate fields from backend
+      // Resume
       setData((prev) => ({
         ...prev,
+        supplierId,
         planId: business.selectedPlanId ?? prev.planId,
         planName: business.planName ?? prev.planName,
         billingCycle:
@@ -196,7 +227,7 @@ export default function OnboardingPage() {
             : "Could not reach the server. Please try again.",
       });
     }
-  }, [router]);
+  }, [router, resolveSupplierId]);
 
   useEffect(() => {
     bootstrapOnboarding();
@@ -335,118 +366,42 @@ export default function OnboardingPage() {
   };
 
   // ─────────────────────────────────────────────
-  // Step 3 — Either activate trial (free) or
-  // initialize SumUp payment (paid plans)
+  // Step 3 — trial activation (free plan)
   // ─────────────────────────────────────────────
-  const handleSubmit = async () => {
+  const handleTrialActivate = async () => {
     const token = getToken();
     if (!token) return;
 
     setIsSaving(true);
     setError(null);
 
-    // Use Number() to handle both 0 and "0" / "0.00" coming from PlanSelection
-    const isTrial = Number(data.planPrice) === 0;
-
     try {
-      // ───────────── TRIAL PATH ─────────────
-      if (isTrial) {
-        const res = await fetch("/api/auth/onboarding/complete-trial", {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        });
-
-        const result = await res.json().catch(() => ({}));
-        if (!res.ok || !result.success) {
-          throw new Error(result.message || "Failed to activate trial");
-        }
-
-        // Trial activated — go to pending-approval (NOT dashboard).
-        // The supplier is not approved yet, so they must wait here.
-        router.replace("/pending-approval");
-        return;
-      }
-
-      // ───────────── PAID PLAN PATH ─────────────
-      // Resolve supplierId from storage (multiple fallbacks)
-      let supplierId: string | null = null;
-
-      try {
-        const stored = localStorage.getItem("supplierData");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          supplierId = parsed.id ?? parsed.supplierId ?? null;
-        }
-      } catch {
-        // ignore
-      }
-
-      if (!supplierId) {
-        supplierId = localStorage.getItem("userId");
-      }
-
-      if (!supplierId) {
-        const meRes = await fetch("/api/auth/supplier/me", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const meData = await meRes.json().catch(() => ({}));
-        if (meData.success && meData.data?.id) {
-          supplierId = meData.data.id;
-          localStorage.setItem("userId", supplierId as string);
-          localStorage.setItem(
-            "supplierData",
-            JSON.stringify({
-              id: supplierId,
-              fullName: meData.data.fullName,
-              email: meData.data.email,
-              role: meData.data.role ?? "SUPPLIER",
-            })
-          );
-        }
-      }
-
-      if (!supplierId) {
-        throw new Error(
-          "Could not determine your supplier ID. Please log in again."
-        );
-      }
-
-      const paymentRes = await fetch("/api/auth/supplier-payment/initialize", {
-        method: "POST",
+      const res = await fetch("/api/auth/onboarding/complete-trial", {
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          supplierId,
-          planId: data.planId,
-          billingCycle: data.billingCycle,
-        }),
       });
 
-      const paymentResult = await paymentRes.json().catch(() => ({}));
-      if (!paymentRes.ok || !paymentResult.success) {
-        throw new Error(
-          paymentResult.message || "Failed to initialize payment"
-        );
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok || !result.success) {
+        throw new Error(result.message || "Failed to activate trial");
       }
 
-      if (paymentResult.checkoutId) {
-        localStorage.setItem("checkoutId", paymentResult.checkoutId);
-      }
-
-      if (!paymentResult.redirectUrl) {
-        throw new Error("Payment redirect missing. Please contact support.");
-      }
-
-      window.location.href = paymentResult.redirectUrl;
+      router.replace("/pending-approval");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
       setIsSaving(false);
     }
+  };
+
+  // ─────────────────────────────────────────────
+  // Step 3 — paid plan (Stripe embedded completes → here)
+  // ─────────────────────────────────────────────
+  const handlePaymentComplete = () => {
+    router.replace("/pending-approval");
   };
 
   // ─────────────────────────────────────────────
@@ -509,7 +464,6 @@ export default function OnboardingPage() {
   // ─────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-neutral-50">
-      {/* Dark header — matches landing page */}
       <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950 text-white">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:h-[72px] lg:px-8">
           <Link href="/" className="flex-shrink-0">
@@ -531,7 +485,6 @@ export default function OnboardingPage() {
           </div>
         </div>
 
-        {/* Slim progress bar */}
         <div className="h-1 w-full bg-neutral-800">
           <div
             className="h-full bg-amber-500 transition-all duration-500 ease-out"
@@ -542,7 +495,6 @@ export default function OnboardingPage() {
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
         <div className="grid gap-8 lg:grid-cols-[1fr_320px] lg:gap-12">
-          {/* ────── Main panel ────── */}
           <div>
             <div className="mb-8">
               <p className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-700">
@@ -590,7 +542,8 @@ export default function OnboardingPage() {
               {currentStep === 3 && (
                 <ReviewSubmit
                   data={data}
-                  onSubmit={handleSubmit}
+                  onTrialActivate={handleTrialActivate}
+                  onPaymentComplete={handlePaymentComplete}
                   onBack={goBack}
                   isSubmitting={isSaving}
                 />
@@ -608,10 +561,8 @@ export default function OnboardingPage() {
             </p>
           </div>
 
-          {/* ────── Sidebar (desktop only) ────── */}
           <aside className="hidden lg:block">
             <div className="sticky top-24 space-y-4">
-              {/* Progress timeline */}
               <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
                 <p className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500">
                   Your progress
@@ -661,7 +612,6 @@ export default function OnboardingPage() {
                 </ol>
               </div>
 
-              {/* Live summary */}
               <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
                 <p className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-neutral-500">
                   Summary
@@ -691,7 +641,6 @@ export default function OnboardingPage() {
                 </dl>
               </div>
 
-              {/* Sign out */}
               <button
                 onClick={() => {
                   localStorage.removeItem("adminToken");

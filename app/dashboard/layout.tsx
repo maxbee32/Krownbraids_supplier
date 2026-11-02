@@ -1,7 +1,7 @@
 // app/dashboard/layout.tsx
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import {
@@ -18,8 +18,6 @@ import {
   BanknotesIcon,
   ExclamationTriangleIcon,
   BellIcon,
-  CheckIcon,
-  InformationCircleIcon,
 } from "@heroicons/react/24/outline";
 import { Logo } from "../components/ui/Logo";
 import { useAuthToken } from "../../lib/hooks/useAuthToken";
@@ -30,6 +28,7 @@ const navItems = [
   { name: "Products", icon: ShoppingBagIcon, href: "/dashboard/products" },
   { name: "Orders", icon: ClipboardDocumentListIcon, href: "/dashboard/orders" },
   { name: "Transactions", icon: BanknotesIcon, href: "/dashboard/transactions" },
+  { name: "Notifications", icon: BellIcon, href: "/dashboard/notifications" },
   { name: "Profile", icon: UserIcon, href: "/dashboard/profile" },
   { name: "Subscription", icon: CreditCardIcon, href: "/dashboard/subscription" },
   { name: "Settings", icon: Cog6ToothIcon, href: "/dashboard/settings" },
@@ -76,104 +75,6 @@ function daysBadge(days: number | null): string {
   return "bg-green-100 text-green-700 border-green-200";
 }
 
-type NotificationTone = "info" | "warning" | "danger" | "success";
-
-interface AppNotification {
-  id: string;
-  title: string;
-  body: string;
-  tone: NotificationTone;
-  href?: string;
-  createdAt: string;
-}
-
-const READ_NOTIFICATIONS_KEY = "supplierReadNotificationIds";
-
-function loadReadIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(READ_NOTIFICATIONS_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((x): x is string => typeof x === "string"));
-  } catch {
-    return new Set();
-  }
-}
-
-function saveReadIds(ids: Set<string>) {
-  try {
-    localStorage.setItem(
-      READ_NOTIFICATIONS_KEY,
-      JSON.stringify(Array.from(ids))
-    );
-  } catch {
-    // ignore
-  }
-}
-
-function deriveNotifications(
-  planName: string | null,
-  billingCycle: string | null,
-  subscriptionEndDate: string | null
-): AppNotification[] {
-  const items: AppNotification[] = [];
-  const now = new Date().toISOString();
-  const days = daysRemaining(subscriptionEndDate);
-
-  if (!planName) {
-    items.push({
-      id: "no-plan",
-      title: "No active subscription",
-      body: "Choose a plan to start selling on KrownBraids.",
-      tone: "warning",
-      href: "/dashboard/subscription",
-      createdAt: now,
-    });
-    return items;
-  }
-
-  if (days !== null && days <= 0) {
-    items.push({
-      id: "subscription-expired",
-      title: "Subscription expired",
-      body: "Your plan has ended. Renew now to keep selling.",
-      tone: "danger",
-      href: "/dashboard/subscription",
-      createdAt: now,
-    });
-  } else if (days !== null && days <= 7) {
-    items.push({
-      id: "subscription-ending-soon",
-      title: `Subscription ends in ${days} day${days === 1 ? "" : "s"}`,
-      body: "Renew now to avoid interruption to your orders.",
-      tone: "warning",
-      href: "/dashboard/subscription",
-      createdAt: now,
-    });
-  } else if (days !== null && days <= 30) {
-    items.push({
-      id: "subscription-ending-month",
-      title: `${days} days left on your plan`,
-      body: "Plan ahead — you can renew anytime from the Subscription page.",
-      tone: "info",
-      href: "/dashboard/subscription",
-      createdAt: now,
-    });
-  }
-
-  items.push({
-    id: "add-first-product",
-    title: "Add your first product",
-    body: "List a product with pricing and stock so buyers can find you.",
-    tone: "info",
-    href: "/dashboard/products",
-    createdAt: now,
-  });
-
-  return items;
-}
-
 export default function DashboardLayout({
   children,
 }: {
@@ -184,10 +85,6 @@ export default function DashboardLayout({
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // ─── Hydration flag ───
-  // useAuthToken reads localStorage via useSyncExternalStore, but
-  // getServerSnapshot returns null during SSR. Without this flag, the
-  // auth guard fires on the first client effect (when isAuthed is still
-  // false from the server snapshot) and redirects to /login on refresh.
   const [isHydrated, setIsHydrated] = useState(false);
   useEffect(() => {
     setIsHydrated(true);
@@ -198,28 +95,39 @@ export default function DashboardLayout({
 
   const { subscription, loading: subLoading } = useSubscription(token);
 
-  const [notifOpen, setNotifOpen] = useState(false);
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
-  const notifRef = useRef<HTMLDivElement | null>(null);
+  // ─── Real unread count from notification-service ───
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    setReadIds(loadReadIds());
-  }, []);
+    if (!isHydrated || !isAuthed) return;
 
-  useEffect(() => {
-    if (!notifOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
-        setNotifOpen(false);
+    let cancelled = false;
+
+    const load = async () => {
+      const t = localStorage.getItem("adminToken");
+      if (!t) return;
+      try {
+        const res = await fetch("/api/auth/notifications/unread-count", {
+          headers: { Authorization: `Bearer ${t}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && typeof data.count === "number") {
+          setUnreadCount(data.count);
+        }
+      } catch {
+        // ignore — keep previous count
       }
     };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [notifOpen]);
 
-  useEffect(() => {
-    setNotifOpen(false);
-  }, [pathname]);
+    load();
+    const id = setInterval(load, 60_000); // refresh every 60s
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [isHydrated, isAuthed, pathname]); // refetch when route changes (e.g. after visiting notifications page)
 
   // ─── Auth guard — waits for hydration ───
   useEffect(() => {
@@ -242,41 +150,8 @@ export default function DashboardLayout({
     .filter((i) => pathname === i.href || pathname.startsWith(i.href + "/"))
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
-  const notifications = useMemo(
-    () =>
-      deriveNotifications(
-        subscription?.planName ?? null,
-        subscription?.billingCycle ?? null,
-        subscription?.subscriptionEndDate ?? null
-      ),
-    [subscription]
-  );
-
-  const unreadCount = notifications.filter((n) => !readIds.has(n.id)).length;
-
-  const markRead = (id: string) => {
-    setReadIds((prev) => {
-      const next = new Set(prev);
-      next.add(id);
-      saveReadIds(next);
-      return next;
-    });
-  };
-
-  const markAllRead = () => {
-    setReadIds((prev) => {
-      const next = new Set(prev);
-      notifications.forEach((n) => next.add(n.id));
-      saveReadIds(next);
-      return next;
-    });
-  };
-
   // ─── Render gates ───
 
-  // Before hydration completes, show a loader. The token hasn't been
-  // read from localStorage yet, so we can't safely redirect OR render
-  // the dashboard.
   if (!isHydrated) {
     return (
       <div className="flex h-dvh items-center justify-center bg-neutral-50">
@@ -285,7 +160,6 @@ export default function DashboardLayout({
     );
   }
 
-  // Hydrated but no token → redirect is in flight; render nothing
   if (!isAuthed) return null;
 
   return (
@@ -307,159 +181,21 @@ export default function DashboardLayout({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Notifications */}
-            <div className="relative" ref={notifRef}>
-              <button
-                onClick={() => setNotifOpen((v) => !v)}
-                className="relative rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-                aria-label={`Notifications${
-                  unreadCount > 0 ? ` (${unreadCount} unread)` : ""
-                }`}
-                aria-expanded={notifOpen}
-              >
-                <BellIcon className="h-5 w-5" />
-                {unreadCount > 0 && (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white ring-2 ring-white">
-                    {unreadCount > 9 ? "9+" : unreadCount}
-                  </span>
-                )}
-              </button>
-
-              {notifOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-40 bg-black/20 sm:hidden"
-                    onClick={() => setNotifOpen(false)}
-                  />
-                  <div className="fixed inset-x-4 top-16 z-50 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-xl sm:absolute sm:inset-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96">
-                    <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-3">
-                      <div>
-                        <p className="text-sm font-semibold text-neutral-900">
-                          Notifications
-                        </p>
-                        <p className="text-xs text-neutral-500">
-                          {unreadCount > 0
-                            ? `${unreadCount} unread`
-                            : "All caught up"}
-                        </p>
-                      </div>
-                      {unreadCount > 0 && (
-                        <button
-                          onClick={markAllRead}
-                          className="text-xs font-medium text-neutral-700 hover:text-neutral-900 hover:underline"
-                        >
-                          Mark all read
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="max-h-[400px] overflow-y-auto">
-                      {notifications.length === 0 ? (
-                        <div className="px-4 py-8 text-center">
-                          <BellIcon className="mx-auto mb-2 h-8 w-8 text-neutral-300" />
-                          <p className="text-sm text-neutral-500">
-                            No notifications
-                          </p>
-                        </div>
-                      ) : (
-                        notifications.map((n) => {
-                          const isRead = readIds.has(n.id);
-                          const toneStyles: Record<
-                            NotificationTone,
-                            { bg: string; icon: React.ReactNode }
-                          > = {
-                            info: {
-                              bg: "bg-blue-50 text-blue-600",
-                              icon: (
-                                <InformationCircleIcon className="h-4 w-4" />
-                              ),
-                            },
-                            warning: {
-                              bg: "bg-amber-50 text-amber-600",
-                              icon: (
-                                <ExclamationTriangleIcon className="h-4 w-4" />
-                              ),
-                            },
-                            danger: {
-                              bg: "bg-red-50 text-red-600",
-                              icon: (
-                                <ExclamationTriangleIcon className="h-4 w-4" />
-                              ),
-                            },
-                            success: {
-                              bg: "bg-emerald-50 text-emerald-600",
-                              icon: <CheckIcon className="h-4 w-4" />,
-                            },
-                          };
-                          const styles = toneStyles[n.tone];
-
-                          return (
-                            <div
-                              key={n.id}
-                              className={`flex gap-3 border-b border-neutral-100 px-4 py-3 transition-colors last:border-0 ${
-                                isRead ? "bg-white" : "bg-neutral-50/50"
-                              }`}
-                            >
-                              <div
-                                className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${styles.bg}`}
-                              >
-                                {styles.icon}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-start justify-between gap-2">
-                                  <p className="text-sm font-medium text-neutral-900">
-                                    {n.title}
-                                  </p>
-                                  {!isRead && (
-                                    <span className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-blue-600" />
-                                  )}
-                                </div>
-                                <p className="mt-0.5 text-xs leading-relaxed text-neutral-600">
-                                  {n.body}
-                                </p>
-                                <div className="mt-2 flex items-center gap-3">
-                                  {n.href && (
-                                    <Link
-                                      href={n.href}
-                                      onClick={() => {
-                                        markRead(n.id);
-                                        setNotifOpen(false);
-                                      }}
-                                      className="text-xs font-medium text-neutral-900 hover:underline"
-                                    >
-                                      View →
-                                    </Link>
-                                  )}
-                                  {!isRead && (
-                                    <button
-                                      onClick={() => markRead(n.id)}
-                                      className="text-xs text-neutral-500 hover:text-neutral-700 hover:underline"
-                                    >
-                                      Mark read
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-
-                    {notifications.length > 0 && (
-                      <div className="border-t border-neutral-100 px-4 py-2 text-center">
-                        <button
-                          onClick={() => setNotifOpen(false)}
-                          className="text-xs font-medium text-neutral-500 hover:text-neutral-700"
-                        >
-                          Close
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </>
+            {/* Notifications — links to the notifications page */}
+            <Link
+              href="/dashboard/notifications"
+              className="relative rounded-lg p-2 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+              aria-label={`Notifications${
+                unreadCount > 0 ? ` (${unreadCount} unread)` : ""
+              }`}
+            >
+              <BellIcon className="h-5 w-5" />
+              {unreadCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white ring-2 ring-white">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
               )}
-            </div>
+            </Link>
 
             <button
               onClick={handleLogout}

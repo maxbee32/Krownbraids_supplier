@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   KeyRound,
   Bell,
-  Clock,
   LogOut,
   AlertTriangle,
   CheckCircle,
@@ -14,8 +13,6 @@ import {
   Eye,
   EyeOff,
   Shield,
-  ShieldCheck,
-  Monitor,
   Download,
   Trash2,
   Mail,
@@ -48,8 +45,6 @@ const DEFAULT_NOTIFS: NotificationPrefs = {
   subscriptionAlerts: true,
   marketingEmails: false,
 };
-
-const NOTIF_STORAGE_KEY = "supplier_notification_prefs";
 
 function validatePassword(pw: string): string[] {
   const errors: string[] = [];
@@ -106,8 +101,13 @@ export default function SettingsPage() {
   });
   const [passwordSaving, setPasswordSaving] = useState(false);
 
-  // Notification prefs
+  // Notification prefs — persisted via API
   const [notifs, setNotifs] = useState<NotificationPrefs>(DEFAULT_NOTIFS);
+  const [notifsLoading, setNotifsLoading] = useState(true);
+  const [notifsSaving, setNotifsSaving] = useState(false);
+
+  // Export
+  const [exporting, setExporting] = useState(false);
 
   // Danger zone
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false);
@@ -115,8 +115,9 @@ export default function SettingsPage() {
   const [deactivating, setDeactivating] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
-  // ─── Load stored data ───
+  // ─── Load stored data + notification prefs ───
   useEffect(() => {
     try {
       const s = localStorage.getItem("supplierData");
@@ -124,12 +125,39 @@ export default function SettingsPage() {
     } catch {
       // ignore
     }
-    try {
-      const n = localStorage.getItem(NOTIF_STORAGE_KEY);
-      if (n) setNotifs({ ...DEFAULT_NOTIFS, ...JSON.parse(n) });
-    } catch {
-      // ignore
-    }
+
+    const loadNotifs = async () => {
+      const token = localStorage.getItem("adminToken");
+      if (!token) {
+        setNotifsLoading(false);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/auth/notification-preferences", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}));
+          if (data.success && data.data) {
+            setNotifs({
+              orderAlerts: data.data.orderAlerts ?? true,
+              payoutAlerts: data.data.payoutAlerts ?? true,
+              productAlerts: data.data.productAlerts ?? true,
+              subscriptionAlerts: data.data.subscriptionAlerts ?? true,
+              marketingEmails: data.data.marketingEmails ?? false,
+            });
+          }
+        }
+      } catch {
+        // keep defaults on network failure
+      } finally {
+        setNotifsLoading(false);
+      }
+    };
+
+    loadNotifs();
   }, []);
 
   const showAlert = (type: "success" | "error", message: string) => {
@@ -205,13 +233,89 @@ export default function SettingsPage() {
     }
   };
 
-  // ─── Notification toggle ───
-  const toggleNotif = (key: keyof NotificationPrefs) => {
-    setNotifs((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
-      localStorage.setItem(NOTIF_STORAGE_KEY, JSON.stringify(next));
-      return next;
-    });
+  // ─── Notification toggle — saves to backend ───
+  const toggleNotif = async (key: keyof NotificationPrefs) => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) {
+      showAlert("error", "Not authenticated.");
+      return;
+    }
+
+    const previous = notifs;
+    const next = { ...notifs, [key]: !notifs[key] };
+
+    // Optimistic update
+    setNotifs(next);
+    setNotifsSaving(true);
+
+    try {
+      const res = await fetch("/api/auth/notification-preferences", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(next),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        setNotifs(previous);
+        throw new Error(
+          data.message || "Failed to save notification preferences"
+        );
+      }
+    } catch (err) {
+      setNotifs(previous);
+      showAlert(
+        "error",
+        err instanceof Error ? err.message : "Failed to save preferences"
+      );
+    } finally {
+      setNotifsSaving(false);
+    }
+  };
+
+  // ─── Export data ───
+  const handleExport = async () => {
+    const token = localStorage.getItem("adminToken");
+    if (!token) {
+      showAlert("error", "Not authenticated.");
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const res = await fetch("/api/auth/export-data", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Failed to export data");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const datePart = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `krownbraids-data-export-${datePart}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+
+      showAlert("success", "Your data export has been downloaded.");
+    } catch (err) {
+      showAlert(
+        "error",
+        err instanceof Error ? err.message : "Failed to export data"
+      );
+    } finally {
+      setExporting(false);
+    }
   };
 
   // ─── Logout ───
@@ -272,6 +376,57 @@ export default function SettingsPage() {
         err instanceof Error ? err.message : "Failed to deactivate account"
       );
       setDeactivating(false);
+    }
+  };
+
+  // ─── Delete ───
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== "DELETE") return;
+
+    const token = localStorage.getItem("adminToken");
+    if (!token) {
+      showAlert("error", "Not authenticated.");
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      const res = await fetch("/api/auth/delete-account", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          reason: "User requested deletion from settings",
+        }),
+      });
+
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`Server error (${res.status})`);
+      }
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Failed to delete account");
+      }
+
+      showAlert(
+        "success",
+        "Your account has been deleted. You'll be signed out shortly."
+      );
+      setDeleteModalOpen(false);
+      setDeleteConfirmText("");
+      setTimeout(handleLogout, 1500);
+    } catch (err) {
+      showAlert(
+        "error",
+        err instanceof Error ? err.message : "Failed to delete account"
+      );
+      setDeleting(false);
     }
   };
 
@@ -489,67 +644,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Two-factor authentication */}
-      <section>
-        <div className="flex items-center gap-2 mb-3">
-          <ShieldCheck className="h-4 w-4 text-neutral-500" />
-          <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
-            Security
-          </h2>
-        </div>
-        <div className="bg-white border border-neutral-200 rounded-2xl divide-y divide-neutral-100">
-          <div className="flex items-center justify-between gap-4 px-5 py-4">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-neutral-900">
-                Two-factor authentication
-              </p>
-              <p className="text-xs text-neutral-500 mt-0.5">
-                Add an extra layer of security to your account
-              </p>
-            </div>
-            <span className="flex-shrink-0 rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1 text-[10px] font-medium text-neutral-600">
-              Coming soon
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 px-5 py-4">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-neutral-900">
-                Active sessions
-              </p>
-              <p className="text-xs text-neutral-500 mt-0.5">
-                Manage devices currently signed in to your account
-              </p>
-            </div>
-            <button
-              onClick={() => showAlert("success", "Session management coming soon.")}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-700 hover:text-neutral-900 flex-shrink-0"
-            >
-              <Monitor className="h-3.5 w-3.5" />
-              View
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between gap-4 px-5 py-4">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-neutral-900">
-                Login history
-              </p>
-              <p className="text-xs text-neutral-500 mt-0.5">
-                See recent logins with device and location
-              </p>
-            </div>
-            <button
-              onClick={() => showAlert("success", "Login history coming soon.")}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-700 hover:text-neutral-900 flex-shrink-0"
-            >
-              <Clock className="h-3.5 w-3.5" />
-              View
-            </button>
-          </div>
-        </div>
-      </section>
-
       {/* Notifications */}
       <section>
         <div className="flex items-center gap-2 mb-3">
@@ -557,39 +651,70 @@ export default function SettingsPage() {
           <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
             Notifications
           </h2>
+          {notifsSaving && (
+            <span className="text-[10px] text-neutral-500 flex items-center gap-1 ml-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Saving…
+            </span>
+          )}
         </div>
-        <div className="bg-white border border-neutral-200 rounded-2xl divide-y divide-neutral-100">
-          <Toggle
-            label="Order alerts"
-            description="New orders, cancellations, and customer messages"
-            checked={notifs.orderAlerts}
-            onChange={() => toggleNotif("orderAlerts")}
-          />
-          <Toggle
-            label="Payout alerts"
-            description="When funds are released or paid out to your bank"
-            checked={notifs.payoutAlerts}
-            onChange={() => toggleNotif("payoutAlerts")}
-          />
-          <Toggle
-            label="Product alerts"
-            description="Low stock warnings and product approval updates"
-            checked={notifs.productAlerts}
-            onChange={() => toggleNotif("productAlerts")}
-          />
-          <Toggle
-            label="Subscription reminders"
-            description="Renewal reminders and payment confirmations"
-            checked={notifs.subscriptionAlerts}
-            onChange={() => toggleNotif("subscriptionAlerts")}
-          />
-          <Toggle
-            label="Marketing emails"
-            description="Product tips, platform updates, and offers"
-            checked={notifs.marketingEmails}
-            onChange={() => toggleNotif("marketingEmails")}
-          />
-        </div>
+
+        {notifsLoading ? (
+          <div className="bg-white border border-neutral-200 rounded-2xl p-5">
+            <div className="animate-pulse space-y-4">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between gap-4"
+                >
+                  <div className="space-y-1 flex-1">
+                    <div className="h-4 w-32 bg-neutral-200 rounded" />
+                    <div className="h-3 w-48 bg-neutral-100 rounded" />
+                  </div>
+                  <div className="h-6 w-11 bg-neutral-200 rounded-full" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white border border-neutral-200 rounded-2xl divide-y divide-neutral-100">
+            <Toggle
+              label="Order alerts"
+              description="New orders, cancellations, and customer messages"
+              checked={notifs.orderAlerts}
+              onChange={() => toggleNotif("orderAlerts")}
+              disabled={notifsSaving}
+            />
+            <Toggle
+              label="Payout alerts"
+              description="When funds are released or paid out to your bank"
+              checked={notifs.payoutAlerts}
+              onChange={() => toggleNotif("payoutAlerts")}
+              disabled={notifsSaving}
+            />
+            <Toggle
+              label="Product alerts"
+              description="Low stock warnings and product approval updates"
+              checked={notifs.productAlerts}
+              onChange={() => toggleNotif("productAlerts")}
+              disabled={notifsSaving}
+            />
+            <Toggle
+              label="Subscription reminders"
+              description="Renewal reminders and payment confirmations"
+              checked={notifs.subscriptionAlerts}
+              onChange={() => toggleNotif("subscriptionAlerts")}
+              disabled={notifsSaving}
+            />
+            <Toggle
+              label="Marketing emails"
+              description="Product tips, platform updates, and offers"
+              checked={notifs.marketingEmails}
+              onChange={() => toggleNotif("marketingEmails")}
+              disabled={notifsSaving}
+            />
+          </div>
+        )}
       </section>
 
       {/* Data & privacy */}
@@ -607,20 +732,26 @@ export default function SettingsPage() {
                 Export your data
               </p>
               <p className="text-xs text-neutral-500 mt-0.5">
-                Download a copy of your products, orders, and account details
+                Download a copy of your account, business, and product data as
+                JSON
               </p>
             </div>
             <button
-              onClick={() =>
-                showAlert(
-                  "success",
-                  "We'll email you a download link within 24 hours."
-                )
-              }
-              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 flex-shrink-0"
+              onClick={handleExport}
+              disabled={exporting}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Download className="h-3.5 w-3.5" />
-              Request
+              {exporting ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Exporting…
+                </>
+              ) : (
+                <>
+                  <Download className="h-3.5 w-3.5" />
+                  Download
+                </>
+              )}
             </button>
           </div>
 
@@ -655,9 +786,7 @@ export default function SettingsPage() {
         <div className="bg-white border border-neutral-200 rounded-2xl p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-sm font-medium text-neutral-900">
-                Sign out
-              </p>
+              <p className="text-sm font-medium text-neutral-900">Sign out</p>
               <p className="text-xs text-neutral-500 mt-1">
                 You&apos;ll be returned to the login page.
               </p>
@@ -674,7 +803,7 @@ export default function SettingsPage() {
       </section>
 
       {/* Danger zone */}
-      <section>
+      <section id="danger-zone">
         <div className="flex items-center gap-2 mb-3">
           <AlertTriangle className="h-4 w-4 text-red-600" />
           <h2 className="text-xs font-semibold text-red-600 uppercase tracking-wider">
@@ -844,7 +973,8 @@ export default function SettingsPage() {
                   <li>Your subscription record</li>
                 </ul>
                 <p className="text-xs text-neutral-500">
-                  Existing orders are retained for tax and legal record-keeping.
+                  Existing orders are retained for tax and legal
+                  record-keeping.
                 </p>
                 <p className="text-sm text-neutral-700 pt-2">
                   Type{" "}
@@ -874,18 +1004,11 @@ export default function SettingsPage() {
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    showAlert(
-                      "error",
-                      "Account deletion requires confirmation from support. We've sent your request."
-                    );
-                    setDeleteModalOpen(false);
-                    setDeleteConfirmText("");
-                  }}
-                  disabled={deleteConfirmText !== "DELETE"}
+                  onClick={handleDeleteAccount}
+                  disabled={deleteConfirmText !== "DELETE" || deleting}
                   className="flex-1 py-2.5 rounded-xl bg-red-600 text-white text-sm font-medium hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Delete account
+                  {deleting ? "Deleting…" : "Delete account"}
                 </button>
               </div>
             </div>
@@ -920,14 +1043,22 @@ function Toggle({
   description,
   checked,
   onChange,
+  disabled,
 }: {
   label: string;
   description: string;
   checked: boolean;
   onChange: () => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex items-center justify-between gap-4 px-5 py-4 cursor-pointer hover:bg-neutral-50 transition-colors">
+    <label
+      className={`flex items-center justify-between gap-4 px-5 py-4 transition-colors ${
+        disabled
+          ? "opacity-60 cursor-not-allowed"
+          : "cursor-pointer hover:bg-neutral-50"
+      }`}
+    >
       <div className="min-w-0">
         <p className="text-sm font-medium text-neutral-900">{label}</p>
         <p className="text-xs text-neutral-500 mt-0.5">{description}</p>
@@ -937,9 +1068,10 @@ function Toggle({
         onClick={onChange}
         role="switch"
         aria-checked={checked}
+        disabled={disabled}
         className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors ${
           checked ? "bg-neutral-900" : "bg-neutral-200"
-        }`}
+        } ${disabled ? "cursor-not-allowed" : ""}`}
       >
         <span
           className={`inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform my-0.5 ${

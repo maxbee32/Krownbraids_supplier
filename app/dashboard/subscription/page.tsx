@@ -14,9 +14,19 @@ import {
   X,
   Loader2,
 } from "lucide-react";
+import { loadStripe } from "@stripe/stripe-js";
+import {
+  EmbeddedCheckoutProvider,
+  EmbeddedCheckout,
+} from "@stripe/react-stripe-js";
+
+const stripePromise = loadStripe(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
+);
 
 interface BusinessProfile {
   id: string;
+  supplierId: string;
   planName: string | null;
   billingCycle: string | null;
   status: string | null;
@@ -47,8 +57,6 @@ interface Plan {
 interface Usage {
   productCount: number;
 }
-
-// ─── Helpers ───
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -85,6 +93,8 @@ function statusBadge(status: string | null): string {
     return "bg-blue-100 text-blue-700 border-blue-200";
   if (s === "REJECTED" || s === "DECLINED")
     return "bg-red-100 text-red-700 border-red-200";
+  if (s === "EXPIRED")
+    return "bg-red-100 text-red-700 border-red-200";
   return "bg-yellow-100 text-yellow-800 border-yellow-200";
 }
 
@@ -96,18 +106,17 @@ function statusLabel(status: string | null): string {
   if (s === "IN_PROGRESS") return "Onboarding";
   if (s === "REJECTED" || s === "DECLINED") return "Rejected";
   if (s === "SUSPENDED") return "Suspended";
+  if (s === "EXPIRED") return "Expired";
   return status || "Unknown";
 }
 
 function planFeatures(plan: Plan): string[] {
   const features: string[] = [];
-
   if (plan.maxProducts === null || plan.maxProducts === 0) {
     features.push("Unlimited products");
   } else {
     features.push(`Up to ${plan.maxProducts} products`);
   }
-
   if (plan.maxOrdersPerMonth === null || plan.maxOrdersPerMonth === 0) {
     features.push("Unlimited orders");
   } else {
@@ -115,20 +124,15 @@ function planFeatures(plan: Plan): string[] {
       `${plan.maxOrdersPerMonth.toLocaleString("en-GB")} orders/month`
     );
   }
-
   if (plan.analytics) features.push("Sales analytics");
   if (plan.advancedReporting) features.push("Advanced reporting");
   if (plan.prioritySupport) features.push("Priority support");
-
   if (plan.trialDays && plan.trialDays > 0) {
     const months = Math.round(plan.trialDays / 30);
     features.push(
-      months > 0
-        ? `${months}-month free trial`
-        : `${plan.trialDays}-day free trial`
+      months > 0 ? `${months}-month free trial` : `${plan.trialDays}-day free trial`
     );
   }
-
   return features;
 }
 
@@ -141,19 +145,11 @@ function planRank(plan: Plan | null): number {
   return 4;
 }
 
-/**
- * Trial eligibility — must match backend `assertTrialEligible`.
- * Any supplier who has EVER had a subscription (trial or paid, active or
- * expired) or has EVER paid is permanently ineligible for TRIAL.
- */
 function canSelectTrial(business: BusinessProfile | null): boolean {
   if (!business) return false;
   if (business.subscriptionStartDate) return false;
   if (business.paymentStatus === "SUCCESS") return false;
-  if (
-    business.status === "APPROVED" ||
-    business.status === "ACTIVE"
-  ) {
+  if (business.status === "APPROVED" || business.status === "ACTIVE") {
     return false;
   }
   return true;
@@ -162,8 +158,6 @@ function canSelectTrial(business: BusinessProfile | null): boolean {
 function isTrialPlan(plan: Plan): boolean {
   return plan.code === "TRIAL" || Number(plan.monthlyPrice) === 0;
 }
-
-// ─── Page ───
 
 export default function SubscriptionPage() {
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
@@ -178,6 +172,11 @@ export default function SubscriptionPage() {
   const [switching, setSwitching] = useState<number | null>(null);
   const [confirmDowngrade, setConfirmDowngrade] = useState<Plan | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  // ── Stripe embedded checkout state ──
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -209,14 +208,10 @@ export default function SubscriptionPage() {
           if (cycle === "yearly" || cycle === "monthly") setBillingCycle(cycle);
         }
 
-        // Proxy returns a bare array; handle both shapes
         let planList: Plan[] = [];
         if (Array.isArray(plansRaw)) {
           planList = plansRaw;
-        } else if (
-          plansRaw &&
-          Array.isArray((plansRaw as { data?: unknown }).data)
-        ) {
+        } else if (plansRaw && Array.isArray((plansRaw as { data?: unknown }).data)) {
           planList = (plansRaw as { data: Plan[] }).data;
         }
         setPlans(planList);
@@ -249,12 +244,11 @@ export default function SubscriptionPage() {
   const hasPlan = !!business?.planName;
   const trialAllowed = canSelectTrial(business);
 
+  // ── Stripe: start checkout for a plan ──
   const handleSelectPlan = async (plan: Plan) => {
     if (!business) return;
-    if (plan.name === business.planName) return;
+    if (plan.name === business.planName && !isExpired) return;
 
-    // Trial is never a paid upgrade/downgrade — it goes through the
-    // supplier service's /complete-trial endpoint, not this page.
     if (isTrialPlan(plan)) {
       setActionError(
         "The Trial plan cannot be selected here. " +
@@ -264,13 +258,13 @@ export default function SubscriptionPage() {
     }
 
     const targetRank = planRank(plan);
-
-    if (currentPlan && targetRank < currentRank) {
+    if (currentPlan && !isExpired && targetRank < currentRank) {
       setConfirmDowngrade(plan);
       return;
     }
 
     setSwitching(plan.id);
+    setPreparing(true);
     setActionError(null);
 
     try {
@@ -280,27 +274,14 @@ export default function SubscriptionPage() {
         return;
       }
 
-      let supplierId: string | null = null;
-      try {
-        const stored = localStorage.getItem("supplierData");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          supplierId = parsed.id ?? parsed.supplierId ?? null;
-        }
-      } catch {
-        // ignore
-      }
-      if (!supplierId) supplierId = localStorage.getItem("userId");
-
+      const supplierId = business.supplierId || business.id;
       if (!supplierId) {
-        setActionError(
-          "Could not determine your supplier ID. Please sign in again."
-        );
+        setActionError("Could not determine your supplier ID. Please sign in again.");
         return;
       }
 
-      const paymentRes = await fetch(
-        "/api/auth/supplier-payment/initialize",
+      const res = await fetch(
+        "/api/auth/supplier-payment/create-stripe-session",
         {
           method: "POST",
           headers: {
@@ -311,33 +292,36 @@ export default function SubscriptionPage() {
             supplierId,
             planId: plan.id,
             billingCycle,
+            email: business.planName ? undefined : undefined, // email not needed here
           }),
         }
       );
 
-      const paymentResult = await paymentRes.json().catch(() => ({}));
-      if (!paymentRes.ok || !paymentResult.success) {
-        throw new Error(
-          paymentResult.message || "Failed to initialize payment"
-        );
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok || !payload.clientSecret) {
+        throw new Error(payload.message || "Failed to initialize payment");
       }
 
-      if (paymentResult.checkoutId) {
-        localStorage.setItem("checkoutId", paymentResult.checkoutId);
-      }
-
-      if (!paymentResult.redirectUrl) {
-        throw new Error("Payment redirect missing. Please contact support.");
-      }
-
-      window.location.href = paymentResult.redirectUrl;
+      setClientSecret(payload.clientSecret);
+      setCheckoutOpen(true);
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Something went wrong"
-      );
+      setActionError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setSwitching(null);
+      setPreparing(false);
     }
+  };
+
+  const handleCheckoutComplete = () => {
+    setCheckoutOpen(false);
+    setClientSecret(null);
+    // Reload so the page reflects the new subscription dates + status
+    window.location.reload();
+  };
+
+  const handleCheckoutClose = () => {
+    setCheckoutOpen(false);
+    setClientSecret(null);
   };
 
   if (loading) {
@@ -415,7 +399,7 @@ export default function SubscriptionPage() {
         </div>
       )}
 
-      {/* Current plan hero */}
+      {/* Current plan hero — unchanged */}
       <div className="bg-gradient-to-br from-neutral-900 to-neutral-800 rounded-2xl p-6 sm:p-8 text-white">
         <div className="flex items-start justify-between gap-4 mb-6">
           <div>
@@ -473,7 +457,7 @@ export default function SubscriptionPage() {
         )}
       </div>
 
-      {/* Usage */}
+      {/* Usage — unchanged */}
       {currentPlan &&
         currentPlan.maxProducts !== null &&
         currentPlan.maxProducts > 0 && (
@@ -484,7 +468,7 @@ export default function SubscriptionPage() {
           />
         )}
 
-      {/* Billing details */}
+      {/* Billing details — unchanged */}
       {hasPlan && (
         <section>
           <h2 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider mb-3">
@@ -522,7 +506,7 @@ export default function SubscriptionPage() {
         </section>
       )}
 
-      {/* Available plans */}
+      {/* Available plans — mostly unchanged, only button handler & labels */}
       {plans.length > 0 && (
         <section>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
@@ -559,8 +543,8 @@ export default function SubscriptionPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {plans.map((plan) => {
-              const isCurrent = plan.name === business.planName &&
-              !isExpired &&  days !== null && days > 0;
+              const isCurrent =
+                plan.name === business.planName && !isExpired && days !== null && days > 0;
               const trialPlan = isTrialPlan(plan);
               const trialBlocked = trialPlan && !trialAllowed;
               const isFree = Number(plan.monthlyPrice) === 0;
@@ -574,14 +558,18 @@ export default function SubscriptionPage() {
               const isUpgrade =
                 !trialBlocked && currentPlan && targetRank > currentRank;
               const isDowngrade =
-                !trialBlocked && currentPlan && targetRank < currentRank;
+                !trialBlocked && currentPlan && !isExpired && targetRank < currentRank;
               const isSwitching = switching === plan.id;
+
+              // Renewal label when expired
+              const isRenewal =
+                isExpired && plan.name === business.planName;
 
               let buttonLabel = "Switch to this plan";
               if (isCurrent) buttonLabel = "Current plan";
               else if (trialBlocked) buttonLabel = "Trial used";
-              else if (trialPlan && !hasPlan)
-                buttonLabel = "Trial (signup only)";
+              else if (trialPlan && !hasPlan) buttonLabel = "Trial (signup only)";
+              else if (isRenewal) buttonLabel = "Renew";
               else if (isUpgrade) buttonLabel = "Upgrade";
               else if (isDowngrade) buttonLabel = "Downgrade";
 
@@ -668,14 +656,14 @@ export default function SubscriptionPage() {
                   </ul>
 
                   <button
-                    disabled={disableButton}
+                    disabled={disableButton || preparing}
                     onClick={() => handleSelectPlan(plan)}
                     className={`w-full py-2.5 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2 ${
                       isCurrent
                         ? "bg-neutral-100 text-neutral-500 cursor-not-allowed"
                         : trialBlocked || trialPlan
                         ? "bg-neutral-100 text-neutral-400 cursor-not-allowed"
-                        : isUpgrade
+                        : isUpgrade || isRenewal
                         ? "bg-neutral-900 text-white hover:bg-neutral-800"
                         : isDowngrade
                         ? "bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-50"
@@ -685,7 +673,7 @@ export default function SubscriptionPage() {
                     {isSwitching ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Redirecting…
+                        Preparing…
                       </>
                     ) : (
                       <>
@@ -728,7 +716,7 @@ export default function SubscriptionPage() {
         </div>
       )}
 
-      {/* Downgrade confirmation modal */}
+      {/* Downgrade confirmation modal — unchanged */}
       {confirmDowngrade && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
@@ -785,6 +773,46 @@ export default function SubscriptionPage() {
           </p>
         </div>
       </div>
+
+      {/* ── Stripe embedded checkout modal ── */}
+      {checkoutOpen && clientSecret && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          onClick={handleCheckoutClose}
+        >
+          <div
+            className="relative w-full max-w-lg overflow-y-auto rounded-2xl bg-white shadow-2xl"
+            style={{ maxHeight: "90vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 flex items-center justify-between rounded-t-2xl border-b border-neutral-200 bg-white px-5 py-3">
+              <h3 className="font-semibold text-neutral-900">
+                Complete payment
+              </h3>
+              <button
+                type="button"
+                onClick={handleCheckoutClose}
+                className="rounded p-1 text-neutral-500 hover:text-neutral-900"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-2">
+              <EmbeddedCheckoutProvider
+                stripe={stripePromise}
+                options={{
+                  clientSecret,
+                  onComplete: handleCheckoutComplete,
+                }}
+              >
+                <EmbeddedCheckout />
+              </EmbeddedCheckoutProvider>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
