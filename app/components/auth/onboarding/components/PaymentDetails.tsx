@@ -55,7 +55,7 @@ export function PaymentDetails({ data, updateData, onNext, onBack }: PaymentDeta
           supplierId,
           planId: data.planId,
           billingCycle: data.billingCycle,
-          email: data.email,
+          // email: data.email,
         }),
       });
 
