@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 const NOTIFICATION_SERVICE_URL =
   process.env.NOTIFICATION_SERVICE_URL ||
-  "https://4ef0-82-36-98-104.ngrok-free.app /nservice";
+  "https://4ef0-82-36-98-104.ngrok-free.app/nservice";
 
 export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
