@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 const SUPPLIER_SERVICE_URL =
   process.env.SUPPLIER_SERVICE_URL ||
-  "https://4ef0-82-36-98-104.ngrok-free.app /supservice/api/v1/auth";
+  "https://5f31-82-36-98-104.ngrok-free.app /supservice/api/v1/auth";
 
 
 /**
