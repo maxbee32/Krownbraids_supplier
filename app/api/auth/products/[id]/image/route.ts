@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 const SUPPLIER_SERVICE_URL =
   process.env.SUPPLIER_SERVICE_URL ||
-  "https://9277-82-36-98-104.ngrok-free.app/supservice/api/v1/auth";
+  "https://daba-82-36-98-104.ngrok-free.app/supservice/api/v1/auth";
 
 function authHeader(request: Request): string | null {
   const h = request.headers.get("authorization");
