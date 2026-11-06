@@ -3,7 +3,7 @@
 
 // const BACKEND_URL =
 //   process.env.SUPPLIER_SERVICE_URL ||
-//   "https://daba-82-36-98-104.ngrok-free.app /supservice";
+//   "https://9125-82-36-98-104.ngrok-free.app /supservice";
 
 // export async function GET(
 //   request: NextRequest,
@@ -53,7 +53,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND_URL =
   process.env.SUPPLIER_SERVICE_URL ||
-  "https://daba-82-36-98-104.ngrok-free.app/supservice";
+  "https://9125-82-36-98-104.ngrok-free.app/supservice";
 
 export async function GET(
   request: NextRequest,

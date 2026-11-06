@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const PAYMENT_SERVICE_URL =
   process.env.PAYMENT_SERVICE_URL ||
-  "https://daba-82-36-98-104.ngrok-free.app/pservice";
+  "https://9125-82-36-98-104.ngrok-free.app/pservice";
 
 export async function GET(request: NextRequest) {
   try {

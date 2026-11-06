@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 
 const NOTIFICATION_SERVICE_URL =
   process.env.NOTIFICATION_SERVICE_URL ||
-  "https://daba-82-36-98-104.ngrok-free.app/nservice";
+  "https://9125-82-36-98-104.ngrok-free.app/nservice";
 
 export async function PATCH(
   request: Request,
